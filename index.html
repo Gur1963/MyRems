@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>MyRems - תזכורות</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#c0392b">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    background: #f4f5f7; color: #222; direction: rtl;
+  }
+  #login-screen, #app-screen { min-height: 100vh; display: flex; flex-direction: column; }
+  #login-screen { align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; }
+  #login-screen .logo { font-size: 64px; }
+  #login-screen h1 { margin: 0; font-size: 24px; }
+  #login-screen p { color: #888; font-size: 14px; margin: 0; max-width: 300px; }
+  .google-btn {
+    margin-top: 12px; padding: 12px 24px; border-radius: 10px; border: 1px solid #ddd;
+    background: #fff; cursor: pointer; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+  }
+  header {
+    background: linear-gradient(135deg,#c0392b,#96281b); color: #fff; padding: 16px;
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  header .title { font-size: 18px; font-weight: 700; }
+  header .user { font-size: 12px; opacity: .9; }
+  header button { background: rgba(255,255,255,.15); border: none; color: #fff; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  #push-banner {
+    background: #fff3cd; color: #856404; padding: 10px 16px; font-size: 13px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0;
+  }
+  #push-banner button {
+    background: #856404; color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+  }
+  #push-banner.ok { background: #d4edda; color: #276036; }
+  main { flex: 1; overflow-y: auto; padding: 12px; }
+  .add-bar { background: #fff; border-radius: 14px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 14px; }
+  .add-bar-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .add-bar-row:last-child { margin-bottom: 0; }
+  .add-input, .date-input {
+    flex: 1; padding: 10px; border-radius: 10px; border: 1px solid #ddd; font-size: 14px; direction: rtl;
+    font-family: inherit;
+  }
+  .add-btn { background: #c0392b; color: #fff; border: none; border-radius: 10px; width: 42px; flex-shrink: 0; font-size: 20px; cursor: pointer; }
+  .offsets-row { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: #666; padding: 6px 2px; }
+  .offsets-row label { display: flex; align-items: center; gap: 3px; }
+  .repeat-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #666; padding: 4px 2px; }
+  .repeat-row select { flex: 1; padding: 6px; border-radius: 8px; border: 1px solid #ddd; font-size: 13px; }
+  .item-row { background: #fff; border-radius: 12px; margin-bottom: 8px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .item-row .row-top { display: flex; align-items: flex-start; gap: 8px; }
+  .item-check {
+    width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0392b; flex-shrink: 0; margin-top: 2px; cursor: pointer;
+  }
+  .item-check.checked { background: #c0392b; }
+  .item-text { font-weight: 600; font-size: 14px; }
+  .item-text.done { text-decoration: line-through; color: #aaa; }
+  .card-action-btn, .item-del {
+    background: none; border: none; font-size: 16px; cursor: pointer; color: #999; flex-shrink: 0;
+  }
+  .item-del { color: #c0392b; }
+  .empty-state { text-align: center; color: #999; padding: 40px 20px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="logo">🔔</div>
+  <h1>MyRems</h1>
+  <p>תזכורות פשוטות לפגישות - עד 3 התראות לכל פריט, וחזרתיות אוטומטית לדברים שקורים כל יום/שבוע/חודש/שנה.</p>
+  <button class="google-btn" onclick="loginWithGoogle()">🔑 כניסה עם חשבון Google</button>
+</div>
+
+<div id="app-screen" style="display:none">
+  <header>
+    <div>
+      <div class="title">🔔 MyRems</div>
+      <div class="user" id="user-name"></div>
+    </div>
+    <button onclick="logout()">יציאה</button>
+  </header>
+
+  <div id="push-banner" style="display:none">
+    <span id="push-banner-text"></span>
+    <button id="push-banner-btn" onclick="enablePush()">הפעל התראות</button>
+  </div>
+
+  <main>
+    <div class="add-bar">
+      <div class="add-bar-row">
+        <input class="add-input" id="new-text" placeholder="לדוגמה: תור לרופא עור"
+               onkeydown="if(event.key==='Enter') document.getElementById('new-location').focus()">
+      </div>
+      <div class="add-bar-row">
+        <input class="add-input" id="new-location" placeholder="מיקום (אופציונלי)"
+               onkeydown="if(event.key==='Enter') document.getElementById('new-date').focus()">
+      </div>
+      <div class="add-bar-row">
+        <input class="date-input" id="new-date" type="date"
+               onkeydown="if(event.key==='Enter') document.getElementById('new-time').focus()">
+        <input class="date-input" id="new-time" type="time"
+               onkeydown="if(event.key==='Enter') addReminder()">
+        <button class="add-btn" onclick="addReminder()">+</button>
+      </div>
+      <div class="offsets-row">
+        <span style="width:100%;font-size:11px;color:#999">מתי להתריע (עד 3):</span>
+        <label><input type="checkbox" class="offset-cb" value="168" onchange="onOffsetChange(this)">שבוע לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="72" onchange="onOffsetChange(this)">3 ימים לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="24" checked onchange="onOffsetChange(this)">יום לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="12" onchange="onOffsetChange(this)">חצי יום לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="2" onchange="onOffsetChange(this)">שעתיים לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="1" onchange="onOffsetChange(this)">שעה לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="0.5" onchange="onOffsetChange(this)">חצי שעה לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="0.1667" onchange="onOffsetChange(this)">10 דקות לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="0" onchange="onOffsetChange(this)">בדיוק בזמן הפגישה</label>
+      </div>
+      <div class="repeat-row">
+        <span style="font-size:11px;color:#999">חזרתיות:</span>
+        <select id="new-repeat">
+          <option value="none">חד פעמי</option>
+          <option value="daily">כל יום</option>
+          <option value="weekly">כל שבוע</option>
+          <option value="monthly">כל חודש</option>
+          <option value="yearly">כל שנה</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="items-list"></div>
+  </main>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+// אותו פרויקט Firebase שכבר קיים ל-MyLists - רק collection נפרד ('rems_users'),
+// כדי לא לגעת בנתונים הקיימים של MyLists.
+const firebaseConfig = {
+  apiKey: "AIzaSyB4g5PzhJfyMXfXlpDtbaMkheESumDOWqw",
+  authDomain: "mylist-96189.firebaseapp.com",
+  projectId: "mylist-96189",
+  storageBucket: "mylist-96189.firebasestorage.app",
+  messagingSenderId: "132272435621",
+  appId: "1:132272435621:web:47b082b3f2f44ca7b6384c"
+};
+
+// המפתח הציבורי של VAPID - בטוח לחשוף בקוד הלקוח (זו בדיוק המטרה שלו).
+// המפתח הפרטי המקביל נשמר בסוד ב-GitHub Secrets, לא כאן.
+const VAPID_PUBLIC_KEY = "BHHrEpyuZlT2kcWxCAX_nkR6X2NExR7N15YbbteUXoLr-b7M9FMrMEA3Ogd6XLDkFF4s_jRu2_XATR-nt5ksYkw";
+
+const app  = initializeApp(firebaseConfig);
+const db   = getFirestore(app);
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+let currentUser = null;
+let DOC = null;
+let data = { items: [], pushSubscription: null };
+
+// ── אפשרויות זמני התראה וחזרתיות (זהה ל-MyLists, לעקביות) ──────────────────
+const OFFSET_OPTIONS = [
+  { hours: 168,    label: 'שבוע לפני' },
+  { hours: 72,     label: '3 ימים לפני' },
+  { hours: 24,     label: 'יום לפני' },
+  { hours: 12,     label: 'חצי יום לפני' },
+  { hours: 2,      label: 'שעתיים לפני' },
+  { hours: 1,      label: 'שעה לפני' },
+  { hours: 0.5,    label: 'חצי שעה לפני' },
+  { hours: 0.1667, label: '10 דקות לפני' },
+  { hours: 0,      label: 'בדיוק בזמן הפגישה' },
+];
+function offsetLabel(hours) {
+  const opt = OFFSET_OPTIONS.find(o => Math.abs(o.hours - hours) < 0.01);
+  return opt ? opt.label : `${hours} שעות לפני`;
+}
+
+const REPEAT_OPTIONS = [
+  { value: 'none',    label: 'חד פעמי' },
+  { value: 'daily',   label: 'כל יום' },
+  { value: 'weekly',  label: 'כל שבוע' },
+  { value: 'monthly', label: 'כל חודש' },
+  { value: 'yearly',  label: 'כל שנה' },
+];
+function repeatLabel(value) {
+  const opt = REPEAT_OPTIONS.find(o => o.value === value);
+  return opt ? opt.label : '';
+}
+
+// ── שמירה/טעינה ──────────────────────────────────────────────────────────
+async function save() {
+  if (!DOC) return;
+  try { await setDoc(DOC, data); }
+  catch (e) { alert('שגיאת שמירה: ' + e.message); }
+}
+
+async function loadFromCloud() {
+  try {
+    const snap = await getDoc(DOC);
+    if (snap.exists()) {
+      data = snap.data();
+      if (!Array.isArray(data.items)) data.items = [];
+    } else {
+      data = { items: [], pushSubscription: null };
+      await setDoc(DOC, data);
+    }
+  } catch (e) {
+    console.error('שגיאת טעינה:', e);
+  }
+  renderItems();
+  refreshPushBanner();
+}
+
+// ── התחברות (בלי רשימת אישור - כל מי שיש לו חשבון גוגל יכול להירשם) ────────
+function showLoginScreen() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'none';
+}
+function showAppScreen() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'flex';
+}
+
+let _loginInProgress = false;
+async function loginWithGoogle() {
+  if (_loginInProgress) return;
+  _loginInProgress = true;
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (e) {
+    if (e.code !== 'auth/cancelled-popup-request' && e.code !== 'auth/popup-closed-by-user') {
+      alert('שגיאת כניסה: ' + e.message);
+    }
+  } finally {
+    _loginInProgress = false;
+  }
+}
+
+async function logout() { await signOut(auth); }
+
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    currentUser = user;
+    DOC = doc(db, 'rems_users', user.uid);
+    document.getElementById('user-name').textContent = user.displayName || user.email;
+    await loadFromCloud();
+    showAppScreen();
+  } else {
+    currentUser = null;
+    DOC = null;
+    showLoginScreen();
+  }
+});
+
+// ── Push: הפעלת התראות בדפדפן (Web Push) ────────────────────────────────
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+function refreshPushBanner() {
+  const banner = document.getElementById('push-banner');
+  const text = document.getElementById('push-banner-text');
+  const btn = document.getElementById('push-banner-btn');
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    banner.style.display = 'flex';
+    banner.className = '';
+    text.textContent = 'הדפדפן הזה לא תומך בהתראות Push.';
+    btn.style.display = 'none';
+    return;
+  }
+  if (Notification.permission === 'granted' && data.pushSubscription) {
+    banner.style.display = 'flex';
+    banner.className = 'ok';
+    text.textContent = '✓ התראות מופעלות במכשיר הזה';
+    btn.style.display = 'none';
+  } else {
+    banner.style.display = 'flex';
+    banner.className = '';
+    text.textContent = 'כדי לקבל תזכורות צריך להפעיל התראות במכשיר הזה.';
+    btn.style.display = '';
+  }
+}
+
+async function enablePush() {
+  try {
+    const reg = await navigator.serviceWorker.register('sw.js');
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      alert('לא אושרה הרשאה להתראות - אי אפשר לשלוח תזכורות בלי זה.');
+      return;
+    }
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+    data.pushSubscription = subscription.toJSON();
+    await save();
+    refreshPushBanner();
+  } catch (e) {
+    alert('שגיאה בהפעלת התראות: ' + e.message);
+  }
+}
+
+// ── Reminders CRUD ───────────────────────────────────────────────────────
+function onOffsetChange(cb) {
+  const checked = document.querySelectorAll('.offset-cb:checked');
+  if (checked.length > 3) {
+    cb.checked = false;
+    alert('אפשר לבחור עד 3 זמני התראה לכל תזכורת');
+  }
+}
+function getSelectedOffsets() {
+  return Array.from(document.querySelectorAll('.offset-cb:checked')).map(cb => parseFloat(cb.value));
+}
+function resetOffsetCheckboxes(selected) {
+  const sel = (selected && selected.length) ? selected : [24];
+  document.querySelectorAll('.offset-cb').forEach(cb => {
+    cb.checked = sel.some(h => Math.abs(h - parseFloat(cb.value)) < 0.01);
+  });
+}
+
+function renderItems() {
+  const container = document.getElementById('items-list');
+  container.innerHTML = '';
+  if (!data.items.length) {
+    container.innerHTML = '<div class="empty-state">אין תזכורות עדיין - הוסיפו אחת למעלה 👆</div>';
+    return;
+  }
+  data.items.forEach((item, i) => renderRow(container, i, item));
+}
+
+function renderRow(container, i, item) {
+  const dateLabel = item.date ? new Date(item.date + 'T00:00:00').toLocaleDateString('he-IL', {day:'numeric',month:'short',year:'numeric'}) : '';
+  const timeLabel = item.time || '';
+  const offsets = (item.reminderOffsets && item.reminderOffsets.length) ? item.reminderOffsets : [24];
+  const offsetsText = offsets.map(offsetLabel).join(' · ');
+  const repeatText = (item.repeat && item.repeat !== 'none') ? repeatLabel(item.repeat) : '';
+  const row = document.createElement('div');
+  row.className = 'item-row';
+  row.innerHTML = `
+    <div class="row-top">
+      <div class="item-check ${item.done?'checked':''}" onclick="toggleItem(${i})"></div>
+      <div style="flex:1;min-width:0">
+        <div class="item-text ${item.done?'done':''}">${item.text}</div>
+        ${item.location ? `<div style="font-size:12px;color:#888;margin-top:2px">📍 ${item.location}</div>` : ''}
+        <div style="font-size:12px;color:#c0392b;margin-top:4px">🔔 ${dateLabel}${timeLabel ? ' · ' + timeLabel : ''}</div>
+        <div style="font-size:10px;color:#aaa;margin-top:2px">⏰ ${offsetsText}</div>
+        ${repeatText ? `<div style="font-size:10px;color:#8e44ad;margin-top:2px">🔁 ${repeatText}</div>` : ''}
+      </div>
+      <button class="card-action-btn" onclick="editItem(${i})">✎</button>
+      <button class="item-del" onclick="deleteItem(${i})">✕</button>
+    </div>`;
+  container.appendChild(row);
+}
+
+function toggleItem(i) {
+  data.items[i].done = !data.items[i].done;
+  save(); renderItems();
+}
+
+function deleteItem(i) {
+  data.items.splice(i, 1);
+  save(); renderItems();
+}
+
+function editItem(i) {
+  const item = data.items[i];
+  const text = prompt('פרטי הפגישה:', item.text);
+  if (text === null || !text.trim()) return;
+  const location = prompt('מיקום (אופציונלי):', item.location || '');
+  const date = prompt('תאריך (YYYY-MM-DD):', item.date || '');
+  const time = prompt('שעה (HH:MM):', item.time || '');
+
+  const offsetLegend = OFFSET_OPTIONS.map((o, idx) => `${idx + 1}. ${o.label}`).join('\n');
+  const currentOffsets = (item.reminderOffsets && item.reminderOffsets.length) ? item.reminderOffsets : [24];
+  const currentNums = currentOffsets
+    .map(h => OFFSET_OPTIONS.findIndex(o => Math.abs(o.hours - h) < 0.01) + 1)
+    .filter(n => n > 0).join(',');
+  const offsetsInput = prompt(`מתי להתריע (עד 3, מספרים מופרדים בפסיק):\n${offsetLegend}`, currentNums || '3');
+  let reminderOffsets = currentOffsets;
+  if (offsetsInput !== null) {
+    const nums = offsetsInput.split(',').map(s => parseInt(s.trim(), 10)).filter(n => n >= 1 && n <= OFFSET_OPTIONS.length);
+    const uniqueNums = [...new Set(nums)].slice(0, 3);
+    if (uniqueNums.length) reminderOffsets = uniqueNums.map(n => OFFSET_OPTIONS[n - 1].hours);
+  }
+
+  const repeatLegend = REPEAT_OPTIONS.map((o, idx) => `${idx + 1}. ${o.label}`).join('\n');
+  const currentRepeat = item.repeat || 'none';
+  const currentRepeatNum = REPEAT_OPTIONS.findIndex(o => o.value === currentRepeat) + 1;
+  const repeatInput = prompt(`חזרתיות:\n${repeatLegend}`, String(currentRepeatNum || 1));
+  let repeat = currentRepeat;
+  if (repeatInput !== null) {
+    const n = parseInt(repeatInput.trim(), 10);
+    if (n >= 1 && n <= REPEAT_OPTIONS.length) repeat = REPEAT_OPTIONS[n - 1].value;
+  }
+
+  item.text = text.trim();
+  item.location = (location || '').trim();
+  item.date = date || item.date;
+  item.time = time || item.time;
+  item.reminderOffsets = reminderOffsets;
+  item.repeat = repeat;
+  item.notifiedOffsets = [];
+  item.done = false;
+  save(); renderItems();
+}
+
+function addReminder() {
+  const text = document.getElementById('new-text').value.trim();
+  const location = document.getElementById('new-location').value.trim();
+  const date = document.getElementById('new-date').value;
+  const time = document.getElementById('new-time').value;
+  if (!text || !date || !time) return;
+  let reminderOffsets = getSelectedOffsets();
+  if (!reminderOffsets.length) reminderOffsets = [24];
+  const repeat = document.getElementById('new-repeat').value || 'none';
+  data.items.push({ text, location, date, time, done: false, reminderOffsets, notifiedOffsets: [], repeat });
+  save(); renderItems();
+  document.getElementById('new-text').value = '';
+  document.getElementById('new-location').value = '';
+  document.getElementById('new-date').value = '';
+  document.getElementById('new-time').value = '';
+  resetOffsetCheckboxes([24]);
+  document.getElementById('new-repeat').value = 'none';
+  document.getElementById('new-text').focus();
+}
+
+// חשיפה ל-window - חובה כי זה <script type="module">, ואירועי onclick/onchange
+// בתוך ה-HTML רצים בהיקף הגלובלי ולא יכולים לראות פונקציות ברמת המודול.
+Object.assign(window, {
+  loginWithGoogle, logout, enablePush,
+  onOffsetChange, toggleItem, deleteItem, editItem, addReminder,
+});
+</script>
+</body>
+</html>
