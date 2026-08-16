@@ -104,11 +104,23 @@ async function sendPush(subscription, item, offsetText) {
   const dateLabel = new Date(item.date + 'T00:00:00').toLocaleDateString('he-IL', {
     day: 'numeric', month: 'long', year: 'numeric',
   });
-  let body = `בתאריך ${dateLabel} בשעה ${item.time} יש לך פגישה עם ${item.text}`;
-  if (item.location) body += ` (${item.location})`;
-  const title = offsetText ? `🔔 תזכורת לפגישה (${offsetText})` : '🔔 תזכורת לפגישה';
+  // שם התזכורת עצמו (item.text) הוא הדבר הכי חשוב שרוצים לראות - שמים אותו בכותרת
+  // (מוצג גדול/מודגש) במקום קבור בתוך גוף ההודעה, כדי שיהיה ברור מיד על מה מדובר
+  // בלי לפתוח את האפליקציה.
+  const title = `🔔 ${item.text}`;
+  let body = `${dateLabel} בשעה ${item.time}`;
+  if (item.location) body += ` · ${item.location}`;
+  if (offsetText) body += ` (${offsetText})`;
 
-  const payload = JSON.stringify({ title, body, url: './index.html', tag: `myrems-${item.date}-${item.time}` });
+  // מפתח לזיהוי הפריט המדויק (אותו פורמט כמו data-key ב-index.html) - כדי שלחיצה
+  // על ההתראה תוביל ישר אליו בתוך האפליקציה (עם גלילה + הבהוב), בלי לגלול ולחפש.
+  const highlightKey = `${item.date}|${item.time}`;
+  const payload = JSON.stringify({
+    title,
+    body,
+    url: `./index.html?highlight=${encodeURIComponent(highlightKey)}`,
+    tag: `myrems-${item.date}-${item.time}`,
+  });
 
   try {
     await webpush.sendNotification(subscription, payload);
