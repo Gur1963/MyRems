@@ -50,7 +50,9 @@
   .offsets-row label { display: flex; align-items: center; gap: 3px; }
   .repeat-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #666; padding: 4px 2px; }
   .repeat-row select { flex: 1; padding: 6px; border-radius: 8px; border: 1px solid #ddd; font-size: 13px; }
-  .item-row { background: #fff; border-radius: 12px; margin-bottom: 8px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .item-row { background: #fff; border-radius: 12px; margin-bottom: 8px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); transition: box-shadow .3s, background .3s; }
+  .item-row.highlight-flash { animation: highlight-pulse 1.4s ease-in-out 2; box-shadow: 0 0 0 3px #c0392b; }
+  @keyframes highlight-pulse { 0%,100% { background: #fff; } 50% { background: #fdecea; } }
   .item-row .row-top { display: flex; align-items: flex-start; gap: 8px; }
   .item-check {
     width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0392b; flex-shrink: 0; margin-top: 2px; cursor: pointer;
@@ -249,6 +251,7 @@ onAuthStateChanged(auth, async (user) => {
     document.getElementById('user-name').textContent = user.displayName || user.email;
     await loadFromCloud();
     showAppScreen();
+    highlightFromUrl();
   } else {
     currentUser = null;
     DOC = null;
@@ -328,6 +331,23 @@ function resetOffsetCheckboxes(selected) {
   });
 }
 
+// אחרי לחיצה על התראת Push, מגיעים לכאן עם ?highlight=date|time - מגלגלים
+// אל הפריט המתאים ומהבהבים אותו כדי שיהיה ברור מיד איזו תזכורת זו, בלי לגלול ולחפש.
+function highlightFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const key = params.get('highlight');
+  if (!key) return;
+  const row = document.querySelector(`.item-row[data-key="${CSS.escape(key)}"]`);
+  if (row) {
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    row.classList.add('highlight-flash');
+    setTimeout(() => row.classList.remove('highlight-flash'), 3000);
+  }
+  params.delete('highlight');
+  const newUrl = location.pathname + (params.toString() ? '?' + params.toString() : '') + location.hash;
+  history.replaceState(null, '', newUrl);
+}
+
 function renderItems() {
   const container = document.getElementById('items-list');
   container.innerHTML = '';
@@ -346,6 +366,7 @@ function renderRow(container, i, item) {
   const repeatText = (item.repeat && item.repeat !== 'none') ? repeatLabel(item.repeat) : '';
   const row = document.createElement('div');
   row.className = 'item-row';
+  row.dataset.key = `${item.date}|${item.time}`;
   row.innerHTML = `
     <div class="row-top">
       <div class="item-check ${item.done?'checked':''}" onclick="toggleItem(${i})"></div>
