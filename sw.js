@@ -36,9 +36,16 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const targetUrl = (event.notification.data && event.notification.data.url) || './index.html';
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientsArr) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientsArr) => {
       for (const client of clientsArr) {
-        if ('focus' in client) return client.focus();
+        if ('focus' in client) {
+          // האפליקציה כבר פתוחה - מנווטים אותה לכתובת עם ה-highlight כדי שתקפוץ
+          // ישר לתזכורת הרלוונטית במקום שנצטרך לגלול ולחפש אותה.
+          if ('navigate' in client) {
+            try { await client.navigate(targetUrl); } catch (e) { /* לא קריטי אם נכשל */ }
+          }
+          return client.focus();
+        }
       }
       if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
     })
