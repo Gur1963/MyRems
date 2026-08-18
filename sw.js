@@ -31,23 +31,35 @@ self.addEventListener('push', (event) => {
   event.waitUntil(self.registration.showNotification(payload.title, options));
 });
 
-// לחיצה על ההתראה - פותחים/מביאים לחזית את האפליקציה
+// לחיצה על ההתראה - פותחים/מביאים לחזית את האפליקציה.
+// שימו לב: מנסים קודם openWindow (גם אם כבר יש טאב/אפליקציה פתוחה ברקע) ולא
+// focus()/navigate() על קליינט קיים - כי בבדיקות בפועל התברר ש-focus() על טאב
+// שכבר פתוח לא תמיד מצליח "לנצח" אפליקציה native אחרת שפעילה כרגע (כמו משחק),
+// בעוד ש-openWindow הוכח כעובד באמינות בכל המקרים. עבור PWA מותקנת (WebAPK),
+// openWindow על כתובת בתוך ה-scope שלה בדרך כלל רק מעלה לחזית את המופע הקיים
+// במקום לפתוח כפילות.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const targetUrl = (event.notification.data && event.notification.data.url) || './index.html';
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientsArr) => {
+    (async () => {
+      if (self.clients.openWindow) {
+        try {
+          const opened = await self.clients.openWindow(targetUrl);
+          if (opened) return;
+        } catch (e) {
+          // אם openWindow נכשל מסיבה כלשהי, ננסה בכל זאת גיבוי עם טאב קיים למטה
+        }
+      }
+      const clientsArr = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const client of clientsArr) {
         if ('focus' in client) {
-          // האפליקציה כבר פתוחה - מנווטים אותה לכתובת עם ה-highlight כדי שתקפוץ
-          // ישר לתזכורת הרלוונטית במקום שנצטרך לגלול ולחפש אותה.
           if ('navigate' in client) {
             try { await client.navigate(targetUrl); } catch (e) { /* לא קריטי אם נכשל */ }
           }
           return client.focus();
         }
       }
-      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
-    })
+    })()
   );
 });
