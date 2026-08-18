@@ -10,6 +10,10 @@
 const admin = require('firebase-admin');
 const webpush = require('web-push');
 
+// כמה זמן פריט שהושלם (done=true) נשאר בארכיון לפני שהוא נמחק לצמיתות.
+const ARCHIVE_RETENTION_DAYS = 14;
+const ARCHIVE_RETENTION_MS = ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
@@ -189,6 +193,7 @@ async function main() {
       const allSent = offsets.every(offset => notifiedOffsets.some(o => Math.abs(o - offset) < 0.01));
       if (allSent || diffHours <= 0) {
         item.done = true;
+        item.archivedAt = now.toISOString();
         changed = true;
         if (item.repeat && item.repeat !== 'none') {
           const next = buildNextOccurrence(item);
@@ -208,6 +213,31 @@ async function main() {
       data.pushSubscription = null;
       changed = true;
     }
+
+    // פריטים ישנים שסומנו כ-done עוד לפני שהוגדר archivedAt (או פריטים שסומנו ידנית
+    // באפליקציה) - מתחילים להם את שעון השמירה מעכשיו, כדי שגם הם יימחקו בסוף.
+    let backfilled = false;
+    data.items.forEach(item => {
+      if (item.done && !item.archivedAt) {
+        item.archivedAt = now.toISOString();
+        backfilled = true;
+      }
+    });
+    if (backfilled) changed = true;
+
+    // מחיקה סופית של פריטים בארכיון שחלפה עליהם תקופת השמירה (ARCHIVE_RETENTION_DAYS)
+    const beforePurge = data.items.length;
+    data.items = data.items.filter(item => {
+      if (!item.done || !item.archivedAt) return true;
+      const archivedTime = new Date(item.archivedAt).getTime();
+      if (Number.isNaN(archivedTime)) return true;
+      return (now.getTime() - archivedTime) < ARCHIVE_RETENTION_MS;
+    });
+    if (data.items.length !== beforePurge) {
+      changed = true;
+      console.log(`נמחקו לצמיתות ${beforePurge - data.items.length} פריטים מהארכיון (משתמש ${userDoc.id})`);
+    }
+
     if (changed) {
       await userDoc.ref.set(data);
     }
