@@ -65,6 +65,13 @@
   }
   .item-del { color: #c0392b; }
   .empty-state { text-align: center; color: #999; padding: 40px 20px; font-size: 14px; }
+  #archive-section { margin-top: 18px; }
+  .archive-toggle {
+    display: flex; align-items: center; gap: 6px; cursor: pointer; color: #888; font-size: 13px;
+    padding: 10px 4px; user-select: none; border-top: 1px solid #e2e2e2;
+  }
+  #archive-arrow { display: inline-block; transition: transform .2s; }
+  #archive-list .item-row { opacity: .75; }
 </style>
 </head>
 <body>
@@ -132,6 +139,14 @@
     </div>
 
     <div id="items-list"></div>
+
+    <div id="archive-section" style="display:none">
+      <div class="archive-toggle" onclick="toggleArchive()">
+        <span id="archive-arrow">▸</span>
+        <span>ארכיון (<span id="archive-count">0</span>)</span>
+      </div>
+      <div id="archive-list" style="display:none"></div>
+    </div>
   </main>
 </div>
 
@@ -333,29 +348,79 @@ function resetOffsetCheckboxes(selected) {
 
 // אחרי לחיצה על התראת Push, מגיעים לכאן עם ?highlight=date|time - מגלגלים
 // אל הפריט המתאים ומהבהבים אותו כדי שיהיה ברור מיד איזו תזכורת זו, בלי לגלול ולחפש.
+// אם הפריט כבר סומן כבוצע ועבר לארכיון, פותחים את הארכיון אוטומטית ומוצאים אותו שם.
 function highlightFromUrl() {
   const params = new URLSearchParams(location.search);
   const key = params.get('highlight');
   if (!key) return;
-  const row = document.querySelector(`.item-row[data-key="${CSS.escape(key)}"]`);
+
+  let row = document.querySelector(`#items-list .item-row[data-key="${CSS.escape(key)}"]`);
+  if (!row) {
+    row = document.querySelector(`#archive-list .item-row[data-key="${CSS.escape(key)}"]`);
+    if (row && !archiveExpanded) {
+      archiveExpanded = true;
+      renderItems();
+      row = document.querySelector(`#archive-list .item-row[data-key="${CSS.escape(key)}"]`);
+    }
+  }
   if (row) {
     row.scrollIntoView({ behavior: 'smooth', block: 'center' });
     row.classList.add('highlight-flash');
     setTimeout(() => row.classList.remove('highlight-flash'), 3000);
   }
+
   params.delete('highlight');
   const newUrl = location.pathname + (params.toString() ? '?' + params.toString() : '') + location.hash;
   history.replaceState(null, '', newUrl);
 }
 
+// פריטים פעילים (לא בוצעו) מוצגים למעלה, ממוינים לפי התאריך/שעה הקרוב ביותר.
+// פריטים שבוצעו (done) עוברים אוטומטית לאזור "ארכיון" מתקפל בתחתית, ולא נמחקים
+// ידנית יותר - הם יימחקו לצמיתות אוטומטית אחרי תקופת השמירה (ר' send-reminders.js).
+let archiveExpanded = false;
+
+function toggleArchive() {
+  archiveExpanded = !archiveExpanded;
+  renderItems();
+}
+
 function renderItems() {
   const container = document.getElementById('items-list');
+  const archiveSection = document.getElementById('archive-section');
+  const archiveContainer = document.getElementById('archive-list');
+  const archiveCountEl = document.getElementById('archive-count');
+  const archiveArrowEl = document.getElementById('archive-arrow');
   container.innerHTML = '';
-  if (!data.items.length) {
-    container.innerHTML = '<div class="empty-state">אין תזכורות עדיין - הוסיפו אחת למעלה 👆</div>';
-    return;
+  archiveContainer.innerHTML = '';
+
+  const activeItems = data.items.filter(item => !item.done);
+  const archivedItems = data.items.filter(item => item.done);
+
+  activeItems.sort((a, b) => {
+    const ka = `${a.date || ''} ${a.time || ''}`;
+    const kb = `${b.date || ''} ${b.time || ''}`;
+    return ka.localeCompare(kb);
+  });
+  // בארכיון - מי שהושלם/בוצע לאחרונה מוצג ראשון
+  archivedItems.sort((a, b) => (b.archivedAt || '').localeCompare(a.archivedAt || ''));
+
+  if (!activeItems.length) {
+    container.innerHTML = archivedItems.length
+      ? '<div class="empty-state">כל התזכורות הפעילות טופלו ✅<br>אפשר לצפות בהן למטה בארכיון</div>'
+      : '<div class="empty-state">אין תזכורות עדיין - הוסיפו אחת למעלה 👆</div>';
+  } else {
+    activeItems.forEach(item => renderRow(container, data.items.indexOf(item), item));
   }
-  data.items.forEach((item, i) => renderRow(container, i, item));
+
+  if (archivedItems.length) {
+    archiveSection.style.display = '';
+    archiveCountEl.textContent = archivedItems.length;
+    archivedItems.forEach(item => renderRow(archiveContainer, data.items.indexOf(item), item));
+  } else {
+    archiveSection.style.display = 'none';
+  }
+  archiveContainer.style.display = archiveExpanded ? '' : 'none';
+  archiveArrowEl.textContent = archiveExpanded ? '▾' : '▸';
 }
 
 function renderRow(container, i, item) {
@@ -384,7 +449,11 @@ function renderRow(container, i, item) {
 }
 
 function toggleItem(i) {
-  data.items[i].done = !data.items[i].done;
+  const item = data.items[i];
+  item.done = !item.done;
+  // archivedAt מסמן מתי הפריט עבר לארכיון - זה מה שקובע מתי הוא יימחק לצמיתות
+  // (ר' ARCHIVE_RETENTION_MS ב-send-reminders.js). אם מחזירים לפעיל - מנקים את זה.
+  item.archivedAt = item.done ? new Date().toISOString() : null;
   save(); renderItems();
 }
 
@@ -432,6 +501,7 @@ function editItem(i) {
   item.repeat = repeat;
   item.notifiedOffsets = [];
   item.done = false;
+  item.archivedAt = null;
   save(); renderItems();
 }
 
@@ -459,7 +529,7 @@ function addReminder() {
 // בתוך ה-HTML רצים בהיקף הגלובלי ולא יכולים לראות פונקציות ברמת המודול.
 Object.assign(window, {
   loginWithGoogle, logout, enablePush,
-  onOffsetChange, toggleItem, deleteItem, editItem, addReminder,
+  onOffsetChange, toggleItem, deleteItem, editItem, addReminder, toggleArchive,
 });
 </script>
 </body>
