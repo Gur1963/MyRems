@@ -65,13 +65,14 @@
   }
   .item-del { color: #c0392b; }
   .empty-state { text-align: center; color: #999; padding: 40px 20px; font-size: 14px; }
-  #archive-section { margin-top: 18px; }
-  .archive-toggle {
-    display: flex; align-items: center; gap: 6px; cursor: pointer; color: #888; font-size: 13px;
-    padding: 10px 4px; user-select: none; border-top: 1px solid #e2e2e2;
+  .tab-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab-btn {
+    flex: 1; padding: 11px; border-radius: 10px; border: none; background: #fff; color: #888;
+    font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    transition: background .2s, color .2s;
   }
-  #archive-arrow { display: inline-block; transition: transform .2s; }
-  #archive-list .item-row { opacity: .75; }
+  .tab-btn.active { background: #c0392b; color: #fff; }
+  #archive-list .item-row { opacity: .8; }
 </style>
 </head>
 <body>
@@ -138,15 +139,13 @@
       </div>
     </div>
 
-    <div id="items-list"></div>
-
-    <div id="archive-section" style="display:none">
-      <div class="archive-toggle" onclick="toggleArchive()">
-        <span id="archive-arrow">▸</span>
-        <span>ארכיון (<span id="archive-count">0</span>)</span>
-      </div>
-      <div id="archive-list" style="display:none"></div>
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tab-btn-active" onclick="switchTab('active')">🔔 תזכורות</button>
+      <button class="tab-btn" id="tab-btn-archive" onclick="switchTab('archive')">🗄️ ארכיון (<span id="archive-count">0</span>)</button>
     </div>
+
+    <div id="items-list"></div>
+    <div id="archive-list" style="display:none"></div>
   </main>
 </div>
 
@@ -348,7 +347,7 @@ function resetOffsetCheckboxes(selected) {
 
 // אחרי לחיצה על התראת Push, מגיעים לכאן עם ?highlight=date|time - מגלגלים
 // אל הפריט המתאים ומהבהבים אותו כדי שיהיה ברור מיד איזו תזכורת זו, בלי לגלול ולחפש.
-// אם הפריט כבר סומן כבוצע ועבר לארכיון, פותחים את הארכיון אוטומטית ומוצאים אותו שם.
+// אם הפריט כבר סומן כבוצע ועבר לארכיון, עוברים אוטומטית לטאב הארכיון ומוצאים אותו שם.
 function highlightFromUrl() {
   const params = new URLSearchParams(location.search);
   const key = params.get('highlight');
@@ -356,10 +355,11 @@ function highlightFromUrl() {
 
   let row = document.querySelector(`#items-list .item-row[data-key="${CSS.escape(key)}"]`);
   if (!row) {
-    row = document.querySelector(`#archive-list .item-row[data-key="${CSS.escape(key)}"]`);
-    if (row && !archiveExpanded) {
-      archiveExpanded = true;
-      renderItems();
+    // querySelector מוצא אלמנטים גם כשההורה שלהם display:none, אז אפשר לבדוק
+    // בטאב הארכיון גם בלי לעבור אליו קודם
+    const archiveRow = document.querySelector(`#archive-list .item-row[data-key="${CSS.escape(key)}"]`);
+    if (archiveRow) {
+      switchTab('archive');
       row = document.querySelector(`#archive-list .item-row[data-key="${CSS.escape(key)}"]`);
     }
   }
@@ -374,22 +374,22 @@ function highlightFromUrl() {
   history.replaceState(null, '', newUrl);
 }
 
-// פריטים פעילים (לא בוצעו) מוצגים למעלה, ממוינים לפי התאריך/שעה הקרוב ביותר.
-// פריטים שבוצעו (done) עוברים אוטומטית לאזור "ארכיון" מתקפל בתחתית, ולא נמחקים
-// ידנית יותר - הם יימחקו לצמיתות אוטומטית אחרי תקופת השמירה (ר' send-reminders.js).
-let archiveExpanded = false;
+// פריטים פעילים (לא בוצעו) מוצגים בטאב "תזכורות", ממוינים לפי התאריך/שעה הקרוב ביותר.
+// פריטים שבוצעו (done) עוברים אוטומטית לטאב "ארכיון" הנפרד, ולא נמחקים ידנית יותר -
+// הם יימחקו לצמיתות אוטומטית אחרי תקופת השמירה (ר' send-reminders.js).
+let activeTab = 'active'; // 'active' | 'archive'
 
-function toggleArchive() {
-  archiveExpanded = !archiveExpanded;
+function switchTab(tab) {
+  activeTab = tab;
   renderItems();
 }
 
 function renderItems() {
   const container = document.getElementById('items-list');
-  const archiveSection = document.getElementById('archive-section');
   const archiveContainer = document.getElementById('archive-list');
   const archiveCountEl = document.getElementById('archive-count');
-  const archiveArrowEl = document.getElementById('archive-arrow');
+  const tabBtnActive = document.getElementById('tab-btn-active');
+  const tabBtnArchive = document.getElementById('tab-btn-archive');
   container.innerHTML = '';
   archiveContainer.innerHTML = '';
 
@@ -404,23 +404,24 @@ function renderItems() {
   // בארכיון - מי שהושלם/בוצע לאחרונה מוצג ראשון
   archivedItems.sort((a, b) => (b.archivedAt || '').localeCompare(a.archivedAt || ''));
 
+  archiveCountEl.textContent = archivedItems.length;
+
   if (!activeItems.length) {
-    container.innerHTML = archivedItems.length
-      ? '<div class="empty-state">כל התזכורות הפעילות טופלו ✅<br>אפשר לצפות בהן למטה בארכיון</div>'
-      : '<div class="empty-state">אין תזכורות עדיין - הוסיפו אחת למעלה 👆</div>';
+    container.innerHTML = '<div class="empty-state">אין תזכורות פעילות - הוסיפו אחת למעלה 👆</div>';
   } else {
     activeItems.forEach(item => renderRow(container, data.items.indexOf(item), item));
   }
 
-  if (archivedItems.length) {
-    archiveSection.style.display = '';
-    archiveCountEl.textContent = archivedItems.length;
-    archivedItems.forEach(item => renderRow(archiveContainer, data.items.indexOf(item), item));
+  if (!archivedItems.length) {
+    archiveContainer.innerHTML = '<div class="empty-state">הארכיון ריק</div>';
   } else {
-    archiveSection.style.display = 'none';
+    archivedItems.forEach(item => renderRow(archiveContainer, data.items.indexOf(item), item));
   }
-  archiveContainer.style.display = archiveExpanded ? '' : 'none';
-  archiveArrowEl.textContent = archiveExpanded ? '▾' : '▸';
+
+  container.style.display = activeTab === 'active' ? '' : 'none';
+  archiveContainer.style.display = activeTab === 'archive' ? '' : 'none';
+  tabBtnActive.classList.toggle('active', activeTab === 'active');
+  tabBtnArchive.classList.toggle('active', activeTab === 'archive');
 }
 
 function renderRow(container, i, item) {
@@ -529,7 +530,7 @@ function addReminder() {
 // בתוך ה-HTML רצים בהיקף הגלובלי ולא יכולים לראות פונקציות ברמת המודול.
 Object.assign(window, {
   loginWithGoogle, logout, enablePush,
-  onOffsetChange, toggleItem, deleteItem, editItem, addReminder, toggleArchive,
+  onOffsetChange, toggleItem, deleteItem, editItem, addReminder, switchTab,
 });
 </script>
 </body>
