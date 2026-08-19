@@ -73,6 +73,25 @@
   }
   .tab-btn.active { background: #c0392b; color: #fff; }
   #archive-list .item-row { opacity: .8; }
+  #noaccess-screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; }
+  #noaccess-screen .logo { font-size: 64px; }
+  #noaccess-screen h1 { margin: 0; font-size: 24px; }
+  #noaccess-screen p { color: #888; font-size: 14px; margin: 0; max-width: 300px; }
+  #admin-screen { min-height: 100vh; display: flex; flex-direction: column; }
+  .user-row {
+    background: #fff; border-radius: 12px; margin-bottom: 8px; padding: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .user-row .user-email { flex: 1; min-width: 140px; font-size: 14px; direction: ltr; text-align: left; word-break: break-all; }
+  .user-status-badge { font-size: 11px; padding: 3px 9px; border-radius: 20px; font-weight: 700; flex-shrink: 0; }
+  .user-status-badge.active { background: #d4edda; color: #276036; }
+  .user-status-badge.suspended { background: #f8d7da; color: #842029; }
+  .user-row .suspend-btn, .user-row .delete-btn {
+    background: none; border: 1px solid #ddd; font-size: 12px; cursor: pointer; flex-shrink: 0;
+    padding: 5px 10px; border-radius: 8px;
+  }
+  .user-row .suspend-btn { color: #856404; }
+  .user-row .delete-btn { color: #c0392b; }
 </style>
 </head>
 <body>
@@ -90,7 +109,10 @@
       <div class="title">🔔 MyRems</div>
       <div class="user" id="user-name"></div>
     </div>
-    <button onclick="logout()">יציאה</button>
+    <div style="display:flex; gap:6px">
+      <button id="admin-btn" style="display:none" onclick="openAdminScreen()">👤 ניהול</button>
+      <button onclick="logout()">יציאה</button>
+    </div>
   </header>
 
   <div id="push-banner" style="display:none">
@@ -149,9 +171,35 @@
   </main>
 </div>
 
+<div id="noaccess-screen" style="display:none">
+  <div class="logo">🔒</div>
+  <h1>אין לך הרשאה</h1>
+  <p>המשתמש הזה עדיין לא אושר לשימוש באפליקציה. פנה למנהל כדי לקבל גישה.</p>
+  <button class="google-btn" onclick="logout()">יציאה</button>
+</div>
+
+<div id="admin-screen" style="display:none">
+  <header>
+    <div>
+      <div class="title">👤 ניהול משתמשים</div>
+    </div>
+    <button onclick="closeAdminScreen()">חזרה</button>
+  </header>
+  <main>
+    <div class="add-bar">
+      <div class="add-bar-row">
+        <input class="add-input" id="new-user-email" placeholder="כתובת Gmail של המשתמש" style="direction:ltr; text-align:left"
+               onkeydown="if(event.key==='Enter') addAllowedUser()">
+        <button class="add-btn" onclick="addAllowedUser()">+</button>
+      </div>
+    </div>
+    <div id="admin-users-list"></div>
+  </main>
+</div>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 // אותו פרויקט Firebase שכבר קיים ל-MyLists - רק collection נפרד ('rems_users'),
@@ -174,7 +222,11 @@ const db   = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
+// כתובת המייל היחידה שרואה את מסך "ניהול משתמשים" ומדלגת אוטומטית על בדיקת ההרשאה.
+const ADMIN_EMAIL = 'gurgurs@gmail.com';
+
 let currentUser = null;
+let isAdmin = false;
 let DOC = null;
 let data = { items: [], pushSubscription: null };
 
@@ -231,14 +283,36 @@ async function loadFromCloud() {
   refreshPushBanner();
 }
 
-// ── התחברות (בלי רשימת אישור - כל מי שיש לו חשבון גוגל יכול להירשם) ────────
-function showLoginScreen() {
-  document.getElementById('login-screen').style.display = 'flex';
+// ── התחברות. גישה מותנית ברשימת משתמשים מורשים (rems_allowed_users) שרק
+// המנהל (ADMIN_EMAIL) יכול לערוך - ר' מסך "ניהול משתמשים" למטה. המנהל עצמו
+// תמיד עובר ישר פנימה בלי לבדוק את הרשימה. ─────────────────────────────────
+function hideAllScreens() {
+  document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('noaccess-screen').style.display = 'none';
+  document.getElementById('admin-screen').style.display = 'none';
+}
+function showLoginScreen() {
+  hideAllScreens();
+  document.getElementById('login-screen').style.display = 'flex';
 }
 function showAppScreen() {
-  document.getElementById('login-screen').style.display = 'none';
+  hideAllScreens();
   document.getElementById('app-screen').style.display = 'flex';
+}
+function showNoAccessScreen() {
+  hideAllScreens();
+  document.getElementById('noaccess-screen').style.display = 'flex';
+}
+
+async function checkUserAllowed(email) {
+  try {
+    const snap = await getDoc(doc(db, 'rems_allowed_users', email));
+    return snap.exists() && snap.data().status === 'active';
+  } catch (e) {
+    console.error('שגיאה בבדיקת הרשאה:', e);
+    return false;
+  }
 }
 
 let _loginInProgress = false;
@@ -261,6 +335,17 @@ async function logout() { await signOut(auth); }
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     currentUser = user;
+    isAdmin = (user.email === ADMIN_EMAIL);
+    document.getElementById('admin-btn').style.display = isAdmin ? '' : 'none';
+
+    if (!isAdmin) {
+      const allowed = await checkUserAllowed(user.email);
+      if (!allowed) {
+        showNoAccessScreen();
+        return;
+      }
+    }
+
     DOC = doc(db, 'rems_users', user.uid);
     document.getElementById('user-name').textContent = user.displayName || user.email;
     await loadFromCloud();
@@ -268,6 +353,7 @@ onAuthStateChanged(auth, async (user) => {
     highlightFromUrl();
   } else {
     currentUser = null;
+    isAdmin = false;
     DOC = null;
     showLoginScreen();
   }
@@ -324,6 +410,87 @@ async function enablePush() {
     refreshPushBanner();
   } catch (e) {
     alert('שגיאה בהפעלת התראות: ' + e.message);
+  }
+}
+
+// ── ניהול משתמשים (רק למנהל - ADMIN_EMAIL) ──────────────────────────────
+// רשימת המשתמשים המורשים נשמרת ב-collection נפרד 'rems_allowed_users',
+// כאשר ה-id של כל מסמך הוא כתובת המייל עצמה. סטטוס 'active' = מורשה,
+// 'suspended' = הרשאה מושהית זמנית (בלי למחוק אותו מהרשימה).
+async function openAdminScreen() {
+  hideAllScreens();
+  document.getElementById('admin-screen').style.display = 'flex';
+  await renderAdminUsers();
+}
+function closeAdminScreen() {
+  showAppScreen();
+}
+
+async function renderAdminUsers() {
+  const container = document.getElementById('admin-users-list');
+  container.innerHTML = '<div class="empty-state">טוען...</div>';
+  try {
+    const snap = await getDocs(collection(db, 'rems_allowed_users'));
+    if (snap.empty) {
+      container.innerHTML = '<div class="empty-state">אין עדיין משתמשים מורשים ברשימה - הוסף אחד למעלה 👆</div>';
+      return;
+    }
+    container.innerHTML = '';
+    snap.forEach(d => {
+      const u = d.data();
+      const status = u.status === 'suspended' ? 'suspended' : 'active';
+      const row = document.createElement('div');
+      row.className = 'user-row';
+      row.innerHTML = `
+        <span class="user-email">${u.email || d.id}</span>
+        <span class="user-status-badge ${status}">${status === 'active' ? 'פעיל' : 'מושהה'}</span>
+        <button class="suspend-btn" onclick="toggleUserStatus('${d.id}','${status}')">${status === 'active' ? 'השהה' : 'הפעל'}</button>
+        <button class="delete-btn" onclick="deleteAllowedUser('${d.id}')">מחק</button>
+      `;
+      container.appendChild(row);
+    });
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state">שגיאה בטעינת רשימת המשתמשים: ' + e.message + '</div>';
+  }
+}
+
+async function addAllowedUser() {
+  const input = document.getElementById('new-user-email');
+  const email = input.value.trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    alert('נא להזין כתובת Gmail תקינה');
+    return;
+  }
+  try {
+    await setDoc(doc(db, 'rems_allowed_users', email), {
+      email,
+      status: 'active',
+      addedAt: new Date().toISOString(),
+    });
+    input.value = '';
+    await renderAdminUsers();
+  } catch (e) {
+    alert('שגיאה בהוספת משתמש: ' + e.message);
+  }
+}
+
+async function toggleUserStatus(email, currentStatus) {
+  const newStatus = currentStatus === 'active' ? 'suspended' : 'active';
+  try {
+    await setDoc(doc(db, 'rems_allowed_users', email), { status: newStatus }, { merge: true });
+    await renderAdminUsers();
+  } catch (e) {
+    alert('שגיאה בעדכון סטטוס: ' + e.message);
+  }
+}
+
+async function deleteAllowedUser(email) {
+  if (!confirm(`למחוק את ${email} מרשימת המשתמשים המורשים?`)) return;
+  try {
+    await deleteDoc(doc(db, 'rems_allowed_users', email));
+    await renderAdminUsers();
+  } catch (e) {
+    alert('שגיאה במחיקת משתמש: ' + e.message);
   }
 }
 
@@ -531,6 +698,7 @@ function addReminder() {
 Object.assign(window, {
   loginWithGoogle, logout, enablePush,
   onOffsetChange, toggleItem, deleteItem, editItem, addReminder, switchTab,
+  openAdminScreen, closeAdminScreen, addAllowedUser, toggleUserStatus, deleteAllowedUser,
 });
 </script>
 </body>
