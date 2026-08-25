@@ -90,6 +90,9 @@ function advanceDate(dateStr, repeat) {
   return null;
 }
 function buildNextOccurrence(item) {
+  // repeatCount = כמה מופעים נשארו, כולל הנוכחי. 1 (או פחות) אומר שזו הייתה
+  // החזרה האחרונה - לא יוצרים מופע נוסף, והפריט פשוט יעבור לארכיון כמו רגיל.
+  if (item.repeatCount != null && item.repeatCount <= 1) return null;
   const nextDate = advanceDate(item.date, item.repeat);
   if (!nextDate) return null;
   return {
@@ -101,6 +104,7 @@ function buildNextOccurrence(item) {
     reminderOffsets: item.reminderOffsets,
     notifiedOffsets: [],
     repeat: item.repeat,
+    repeatCount: (item.repeatCount != null) ? item.repeatCount - 1 : null,
   };
 }
 

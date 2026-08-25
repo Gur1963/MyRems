@@ -158,6 +158,8 @@
           <option value="monthly">כל חודש</option>
           <option value="yearly">כל שנה</option>
         </select>
+        <input type="number" id="new-repeat-count" min="1" placeholder="כמה פעמים (ריק=ללא הגבלה)"
+               style="width:170px; padding:6px; border-radius:8px; border:1px solid #ddd; font-size:13px">
       </div>
     </div>
 
@@ -596,7 +598,9 @@ function renderRow(container, i, item) {
   const timeLabel = item.time || '';
   const offsets = (item.reminderOffsets && item.reminderOffsets.length) ? item.reminderOffsets : [24];
   const offsetsText = offsets.map(offsetLabel).join(' · ');
-  const repeatText = (item.repeat && item.repeat !== 'none') ? repeatLabel(item.repeat) : '';
+  const repeatText = (item.repeat && item.repeat !== 'none')
+    ? repeatLabel(item.repeat) + (item.repeatCount ? ` (עוד ${item.repeatCount})` : '')
+    : '';
   const row = document.createElement('div');
   row.className = 'item-row';
   row.dataset.key = `${item.date}|${item.time}`;
@@ -661,12 +665,24 @@ function editItem(i) {
     if (n >= 1 && n <= REPEAT_OPTIONS.length) repeat = REPEAT_OPTIONS[n - 1].value;
   }
 
+  let repeatCount = item.repeatCount || null;
+  if (repeat !== 'none') {
+    const countInput = prompt('כמה פעמים לחזור (ריק = ללא הגבלה):', item.repeatCount ? String(item.repeatCount) : '');
+    if (countInput !== null) {
+      const n = parseInt(countInput.trim(), 10);
+      repeatCount = (n >= 1) ? n : null;
+    }
+  } else {
+    repeatCount = null;
+  }
+
   item.text = text.trim();
   item.location = (location || '').trim();
   item.date = date || item.date;
   item.time = time || item.time;
   item.reminderOffsets = reminderOffsets;
   item.repeat = repeat;
+  item.repeatCount = repeatCount;
   item.notifiedOffsets = [];
   item.done = false;
   item.archivedAt = null;
@@ -682,7 +698,9 @@ function addReminder() {
   let reminderOffsets = getSelectedOffsets();
   if (!reminderOffsets.length) reminderOffsets = [24];
   const repeat = document.getElementById('new-repeat').value || 'none';
-  data.items.push({ text, location, date, time, done: false, reminderOffsets, notifiedOffsets: [], repeat });
+  const repeatCountRaw = document.getElementById('new-repeat-count').value;
+  const repeatCount = (repeat !== 'none' && repeatCountRaw) ? Math.max(1, parseInt(repeatCountRaw, 10)) : null;
+  data.items.push({ text, location, date, time, done: false, reminderOffsets, notifiedOffsets: [], repeat, repeatCount });
   save(); renderItems();
   document.getElementById('new-text').value = '';
   document.getElementById('new-location').value = '';
@@ -690,6 +708,7 @@ function addReminder() {
   document.getElementById('new-time').value = '';
   resetOffsetCheckboxes([24]);
   document.getElementById('new-repeat').value = 'none';
+  document.getElementById('new-repeat-count').value = '';
   document.getElementById('new-text').focus();
 }
 
