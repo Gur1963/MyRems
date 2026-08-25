@@ -190,8 +190,10 @@ async function main() {
       }
 
       item.notifiedOffsets = notifiedOffsets;
-      const allSent = offsets.every(offset => notifiedOffsets.some(o => Math.abs(o - offset) < 0.01));
-      if (allSent || diffHours <= 0) {
+      // רק כשמועד הפגישה עצמו עבר בפועל - לא כשכל התזכורות שהוגדרו כבר נשלחו (זה
+      // יכול לקרות הרבה לפני המועד, למשל תזכורת יחידה "יום לפני") - כדי לא לארכב
+      // (ואצל פריט חוזר: לא ליצור את המופע הבא) לפני שהאירוע באמת קרה.
+      if (diffHours <= 0) {
         item.done = true;
         item.archivedAt = now.toISOString();
         changed = true;

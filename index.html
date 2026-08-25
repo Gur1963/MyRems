@@ -610,7 +610,7 @@ function renderRow(container, i, item) {
         <div style="font-size:10px;color:#aaa;margin-top:2px">⏰ ${offsetsText}</div>
         ${repeatText ? `<div style="font-size:10px;color:#8e44ad;margin-top:2px">🔁 ${repeatText}</div>` : ''}
       </div>
-      <button class="card-action-btn" onclick="editItem(${i})">✎</button>
+      ${!item.done ? `<button class="card-action-btn" onclick="editItem(${i})">✎</button>` : ''}
       <button class="item-del" onclick="deleteItem(${i})">✕</button>
     </div>`;
   container.appendChild(row);
