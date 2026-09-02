@@ -111,8 +111,7 @@
     </div>
     <div style="display:flex; gap:6px">
       <button id="admin-btn" style="display:none" onclick="openAdminScreen()">👤 ניהול</button>
-      <button id="lang-btn" onclick="toggleLanguage()">EN</button>
-      <button id="logout-btn" onclick="logout()">יציאה</button>
+      <button onclick="logout()">יציאה</button>
     </div>
   </header>
 
@@ -138,18 +137,33 @@
                onkeydown="if(event.key==='Enter') addReminder()">
         <button class="add-btn" onclick="addReminder()">+</button>
       </div>
-      <div class="offsets-row" id="offsets-row">
-        <span id="offsets-label" style="width:100%;font-size:11px;color:#999"></span>
+      <div class="offsets-row">
+        <span style="width:100%;font-size:11px;color:#999">מתי להתריע (עד 3):</span>
+        <label><input type="checkbox" class="offset-cb" value="168" onchange="onOffsetChange(this)">שבוע לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="72" onchange="onOffsetChange(this)">3 ימים לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="24" checked onchange="onOffsetChange(this)">יום לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="12" onchange="onOffsetChange(this)">חצי יום לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="2" onchange="onOffsetChange(this)">שעתיים לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="1" onchange="onOffsetChange(this)">שעה לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="0.5" onchange="onOffsetChange(this)">חצי שעה לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="0.1667" onchange="onOffsetChange(this)">10 דקות לפני</label>
+        <label><input type="checkbox" class="offset-cb" value="0" onchange="onOffsetChange(this)">בדיוק בזמן הפגישה</label>
       </div>
       <div class="repeat-row">
-        <span id="repeat-label" style="font-size:11px;color:#999"></span>
-        <select id="new-repeat"></select>
+        <span style="font-size:11px;color:#999">חזרתיות:</span>
+        <select id="new-repeat">
+          <option value="none">חד פעמי</option>
+          <option value="daily">כל יום</option>
+          <option value="weekly">כל שבוע</option>
+          <option value="monthly">כל חודש</option>
+          <option value="yearly">כל שנה</option>
+        </select>
       </div>
     </div>
 
     <div class="tab-bar">
-      <button class="tab-btn active" id="tab-btn-active" onclick="switchTab('active')"></button>
-      <button class="tab-btn" id="tab-btn-archive" onclick="switchTab('archive')"><span id="tab-archive-text"></span> (<span id="archive-count">0</span>)</button>
+      <button class="tab-btn active" id="tab-btn-active" onclick="switchTab('active')">🔔 תזכורות</button>
+      <button class="tab-btn" id="tab-btn-archive" onclick="switchTab('archive')">🗄️ ארכיון (<span id="archive-count">0</span>)</button>
     </div>
 
     <div id="items-list"></div>
@@ -167,9 +181,9 @@
 <div id="admin-screen" style="display:none">
   <header>
     <div>
-      <div class="title" id="admin-title">👤 ניהול משתמשים</div>
+      <div class="title">👤 ניהול משתמשים</div>
     </div>
-    <button id="admin-back-btn" onclick="closeAdminScreen()">חזרה</button>
+    <button onclick="closeAdminScreen()">חזרה</button>
   </header>
   <main>
     <div class="add-bar">
@@ -216,173 +230,40 @@ let isAdmin = false;
 let DOC = null;
 let data = { items: [], pushSubscription: null };
 
-// ── שפה (עברית/אנגלית) - נשמרת פר-משתמש ב-data.language, ברירת מחדל עברית ─────
-const I18N = {
-  he: {
-    dir: 'rtl', dateLocale: 'he-IL',
-    adminBtn: '👤 ניהול', logoutBtn: 'יציאה', langBtn: 'EN',
-    pushUnsupported: 'הדפדפן הזה לא תומך בהתראות Push.',
-    pushOn: '✓ התראות מופעלות במכשיר הזה',
-    pushOff: 'כדי לקבל תזכורות צריך להפעיל התראות במכשיר הזה.',
-    pushEnableBtn: 'הפעל התראות',
-    newTextPh: 'לדוגמה: תור לרופא עור',
-    newLocationPh: 'מיקום (אופציונלי)',
-    offsetsLabel: 'מתי להתריע (עד 3):',
-    repeatLabel: 'חזרתיות:',
-    tabActive: '🔔 תזכורות', tabArchive: '🗄️ ארכיון',
-    emptyActive: 'אין תזכורות פעילות - הוסיפו אחת למעלה 👆',
-    emptyArchive: 'הארכיון ריק',
-    adminTitle: '👤 ניהול משתמשים', backBtn: 'חזרה',
-    newUserEmailPh: 'כתובת Gmail של המשתמש',
-    adminLoading: 'טוען...',
-    adminEmpty: 'אין עדיין משתמשים מורשים ברשימה - הוסף אחד למעלה 👆',
-    statusActive: 'פעיל', statusSuspended: 'מושהה',
-    suspendBtn: 'השהה', enableBtn: 'הפעל', deleteBtn: 'מחק',
-    errSave: 'שגיאת שמירה: ', errLogin: 'שגיאת כניסה: ',
-    errPushDenied: 'לא אושרה הרשאה להתראות - אי אפשר לשלוח תזכורות בלי זה.',
-    errPushEnable: 'שגיאה בהפעלת התראות: ',
-    errInvalidEmail: 'נא להזין כתובת Gmail תקינה',
-    errAddUser: 'שגיאה בהוספת משתמש: ',
-    errUpdateStatus: 'שגיאה בעדכון סטטוס: ',
-    errDeleteUser: 'שגיאה במחיקת משתמש: ',
-    errLoadUsers: 'שגיאה בטעינת רשימת המשתמשים: ',
-    confirmDeleteUser: email => `למחוק את ${email} מרשימת המשתמשים המורשים?`,
-    maxOffsets: 'אפשר לבחור עד 3 זמני התראה לכל תזכורת',
-    promptText: 'פרטי הפגישה:', promptLocation: 'מיקום (אופציונלי):',
-    promptDate: 'תאריך (YYYY-MM-DD):', promptTime: 'שעה (HH:MM):',
-    promptOffsets: 'מתי להתריע (עד 3, מספרים מופרדים בפסיק):',
-    promptRepeat: 'חזרתיות:',
-    offsets: { 168:'שבוע לפני', 72:'3 ימים לפני', 24:'יום לפני', 12:'חצי יום לפני', 2:'שעתיים לפני', 1:'שעה לפני', 0.5:'חצי שעה לפני', 0.1667:'10 דקות לפני', 0:'בדיוק בזמן הפגישה' },
-    repeats: { none:'חד פעמי', daily:'כל יום', weekly:'כל שבוע', monthly:'כל חודש', yearly:'כל שנה' },
-  },
-  en: {
-    dir: 'ltr', dateLocale: 'en-US',
-    adminBtn: '👤 Admin', logoutBtn: 'Log out', langBtn: 'עב',
-    pushUnsupported: 'This browser does not support push notifications.',
-    pushOn: '✓ Notifications enabled on this device',
-    pushOff: 'Enable notifications on this device to get reminders.',
-    pushEnableBtn: 'Enable notifications',
-    newTextPh: 'e.g. Dermatologist appointment',
-    newLocationPh: 'Location (optional)',
-    offsetsLabel: 'When to remind (up to 3):',
-    repeatLabel: 'Repeat:',
-    tabActive: '🔔 Reminders', tabArchive: '🗄️ Archive',
-    emptyActive: 'No active reminders - add one above 👆',
-    emptyArchive: 'Archive is empty',
-    adminTitle: '👤 Manage Users', backBtn: 'Back',
-    newUserEmailPh: "User's Gmail address",
-    adminLoading: 'Loading...',
-    adminEmpty: 'No approved users yet - add one above 👆',
-    statusActive: 'Active', statusSuspended: 'Suspended',
-    suspendBtn: 'Suspend', enableBtn: 'Enable', deleteBtn: 'Delete',
-    errSave: 'Save error: ', errLogin: 'Sign-in error: ',
-    errPushDenied: "Notification permission wasn't granted - reminders can't be sent without it.",
-    errPushEnable: 'Error enabling notifications: ',
-    errInvalidEmail: 'Please enter a valid Gmail address',
-    errAddUser: 'Error adding user: ',
-    errUpdateStatus: 'Error updating status: ',
-    errDeleteUser: 'Error deleting user: ',
-    errLoadUsers: 'Error loading user list: ',
-    confirmDeleteUser: email => `Remove ${email} from the approved users list?`,
-    maxOffsets: 'You can pick up to 3 reminder times per item',
-    promptText: 'Event details:', promptLocation: 'Location (optional):',
-    promptDate: 'Date (YYYY-MM-DD):', promptTime: 'Time (HH:MM):',
-    promptOffsets: 'When to remind (up to 3, comma-separated numbers):',
-    promptRepeat: 'Repeat:',
-    offsets: { 168:'1 week before', 72:'3 days before', 24:'1 day before', 12:'12 hours before', 2:'2 hours before', 1:'1 hour before', 0.5:'30 minutes before', 0.1667:'10 minutes before', 0:'At the exact time' },
-    repeats: { none:'One-time', daily:'Every day', weekly:'Every week', monthly:'Every month', yearly:'Every year' },
-  },
-};
-function t(key) { return I18N[data.language || 'he'][key]; }
-
 // ── אפשרויות זמני התראה וחזרתיות (זהה ל-MyLists, לעקביות) ──────────────────
-const OFFSET_HOURS = [168, 72, 24, 12, 2, 1, 0.5, 0.1667, 0];
+const OFFSET_OPTIONS = [
+  { hours: 168,    label: 'שבוע לפני' },
+  { hours: 72,     label: '3 ימים לפני' },
+  { hours: 24,     label: 'יום לפני' },
+  { hours: 12,     label: 'חצי יום לפני' },
+  { hours: 2,      label: 'שעתיים לפני' },
+  { hours: 1,      label: 'שעה לפני' },
+  { hours: 0.5,    label: 'חצי שעה לפני' },
+  { hours: 0.1667, label: '10 דקות לפני' },
+  { hours: 0,      label: 'בדיוק בזמן הפגישה' },
+];
 function offsetLabel(hours) {
-  const key = OFFSET_HOURS.find(h => Math.abs(h - hours) < 0.01);
-  return (key !== undefined) ? I18N[data.language || 'he'].offsets[key] : `${hours}h`;
+  const opt = OFFSET_OPTIONS.find(o => Math.abs(o.hours - hours) < 0.01);
+  return opt ? opt.label : `${hours} שעות לפני`;
 }
 
-const REPEAT_VALUES = ['none', 'daily', 'weekly', 'monthly', 'yearly'];
+const REPEAT_OPTIONS = [
+  { value: 'none',    label: 'חד פעמי' },
+  { value: 'daily',   label: 'כל יום' },
+  { value: 'weekly',  label: 'כל שבוע' },
+  { value: 'monthly', label: 'כל חודש' },
+  { value: 'yearly',  label: 'כל שנה' },
+];
 function repeatLabel(value) {
-  return I18N[data.language || 'he'].repeats[value] || '';
+  const opt = REPEAT_OPTIONS.find(o => o.value === value);
+  return opt ? opt.label : '';
 }
-
-// ── בונה מחדש את תיבות הסימון של זמני ההתראה ואת אפשרויות החזרתיות בשפה
-// הנוכחית, תוך שמירה על מה שכבר נבחר (נקרא גם בטעינה ראשונית וגם בהחלפת שפה).
-function buildOffsetCheckboxes() {
-  const container = document.getElementById('offsets-row');
-  const prevSelected = getSelectedOffsets();
-  container.querySelectorAll('label').forEach(el => el.remove());
-  OFFSET_HOURS.forEach(h => {
-    const label = document.createElement('label');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.className = 'offset-cb';
-    cb.value = h;
-    cb.addEventListener('change', () => onOffsetChange(cb));
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(offsetLabel(h)));
-    container.appendChild(label);
-  });
-  resetOffsetCheckboxes(prevSelected.length ? prevSelected : [24]);
-}
-function buildRepeatOptions() {
-  const select = document.getElementById('new-repeat');
-  const prevValue = select.value || 'none';
-  select.innerHTML = '';
-  REPEAT_VALUES.forEach(v => {
-    const opt = document.createElement('option');
-    opt.value = v;
-    opt.textContent = repeatLabel(v);
-    select.appendChild(opt);
-  });
-  select.value = prevValue;
-}
-
-// ── מיישם את השפה הנוכחית על כל הממשק (טקסטים, כיוון, פריטים) - נקרא בטעינה
-// ובכל החלפת שפה.
-function applyI18n() {
-  const cfg = I18N[data.language || 'he'];
-  document.documentElement.lang = (data.language || 'he');
-  document.documentElement.dir = cfg.dir;
-  document.body.style.direction = cfg.dir;
-  document.title = (data.language === 'en') ? 'MyRems - Reminders' : 'MyRems - תזכורות';
-
-  document.getElementById('admin-btn').textContent = t('adminBtn');
-  document.getElementById('lang-btn').textContent = t('langBtn');
-  document.getElementById('logout-btn').textContent = t('logoutBtn');
-  document.getElementById('push-banner-btn').textContent = t('pushEnableBtn');
-  document.getElementById('new-text').placeholder = t('newTextPh');
-  document.getElementById('new-text').style.direction = cfg.dir;
-  document.getElementById('new-location').placeholder = t('newLocationPh');
-  document.getElementById('new-location').style.direction = cfg.dir;
-  document.getElementById('offsets-label').textContent = t('offsetsLabel');
-  document.getElementById('repeat-label').textContent = t('repeatLabel');
-  document.getElementById('tab-btn-active').textContent = t('tabActive');
-  document.getElementById('tab-archive-text').textContent = t('tabArchive');
-  document.getElementById('admin-title').textContent = t('adminTitle');
-  document.getElementById('admin-back-btn').textContent = t('backBtn');
-  document.getElementById('new-user-email').placeholder = t('newUserEmailPh');
-
-  buildOffsetCheckboxes();
-  buildRepeatOptions();
-  renderItems();
-  refreshPushBanner();
-  if (document.getElementById('admin-screen').style.display !== 'none') renderAdminUsers();
-}
-
-function toggleLanguage() {
-  data.language = (data.language === 'en') ? 'he' : 'en';
-  save();
-  applyI18n();
-}
-applyI18n();
 
 // ── שמירה/טעינה ──────────────────────────────────────────────────────────
 async function save() {
   if (!DOC) return;
   try { await setDoc(DOC, data); }
-  catch (e) { alert(t('errSave') + e.message); }
+  catch (e) { alert('שגיאת שמירה: ' + e.message); }
 }
 
 async function loadFromCloud() {
@@ -398,7 +279,8 @@ async function loadFromCloud() {
   } catch (e) {
     console.error('שגיאת טעינה:', e);
   }
-  applyI18n();
+  renderItems();
+  refreshPushBanner();
 }
 
 // ── התחברות. גישה מותנית ברשימת משתמשים מורשים (rems_allowed_users) שרק
@@ -410,16 +292,8 @@ function hideAllScreens() {
   document.getElementById('noaccess-screen').style.display = 'none';
   document.getElementById('admin-screen').style.display = 'none';
 }
-// מסכי הכניסה וה"אין הרשאה" תמיד בעברית (עוד לפני שידוע לנו באיזו שפה המשתמש
-// בחר לעבוד בתוך האפליקציה) - מאפסים דחיפה של כיוון RTL/LTR שנשארה מסשן קודם.
-function forceHebrewDir() {
-  document.documentElement.lang = 'he';
-  document.documentElement.dir = 'rtl';
-  document.body.style.direction = 'rtl';
-}
 function showLoginScreen() {
   hideAllScreens();
-  forceHebrewDir();
   document.getElementById('login-screen').style.display = 'flex';
 }
 function showAppScreen() {
@@ -428,7 +302,6 @@ function showAppScreen() {
 }
 function showNoAccessScreen() {
   hideAllScreens();
-  forceHebrewDir();
   document.getElementById('noaccess-screen').style.display = 'flex';
 }
 
@@ -450,7 +323,7 @@ async function loginWithGoogle() {
     await signInWithPopup(auth, provider);
   } catch (e) {
     if (e.code !== 'auth/cancelled-popup-request' && e.code !== 'auth/popup-closed-by-user') {
-      alert(t('errLogin') + e.message);
+      alert('שגיאת כניסה: ' + e.message);
     }
   } finally {
     _loginInProgress = false;
@@ -503,19 +376,19 @@ function refreshPushBanner() {
   if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
     banner.style.display = 'flex';
     banner.className = '';
-    text.textContent = t('pushUnsupported');
+    text.textContent = 'הדפדפן הזה לא תומך בהתראות Push.';
     btn.style.display = 'none';
     return;
   }
   if (Notification.permission === 'granted' && data.pushSubscription) {
     banner.style.display = 'flex';
     banner.className = 'ok';
-    text.textContent = t('pushOn');
+    text.textContent = '✓ התראות מופעלות במכשיר הזה';
     btn.style.display = 'none';
   } else {
     banner.style.display = 'flex';
     banner.className = '';
-    text.textContent = t('pushOff');
+    text.textContent = 'כדי לקבל תזכורות צריך להפעיל התראות במכשיר הזה.';
     btn.style.display = '';
   }
 }
@@ -525,7 +398,7 @@ async function enablePush() {
     const reg = await navigator.serviceWorker.register('sw.js');
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
-      alert(t('errPushDenied'));
+      alert('לא אושרה הרשאה להתראות - אי אפשר לשלוח תזכורות בלי זה.');
       return;
     }
     const subscription = await reg.pushManager.subscribe({
@@ -536,7 +409,7 @@ async function enablePush() {
     await save();
     refreshPushBanner();
   } catch (e) {
-    alert(t('errPushEnable') + e.message);
+    alert('שגיאה בהפעלת התראות: ' + e.message);
   }
 }
 
@@ -555,31 +428,29 @@ function closeAdminScreen() {
 
 async function renderAdminUsers() {
   const container = document.getElementById('admin-users-list');
-  container.innerHTML = `<div class="empty-state">${t('adminLoading')}</div>`;
+  container.innerHTML = '<div class="empty-state">טוען...</div>';
   try {
     const snap = await getDocs(collection(db, 'rems_allowed_users'));
     if (snap.empty) {
-      container.innerHTML = `<div class="empty-state">${t('adminEmpty')}</div>`;
+      container.innerHTML = '<div class="empty-state">אין עדיין משתמשים מורשים ברשימה - הוסף אחד למעלה 👆</div>';
       return;
     }
     container.innerHTML = '';
     snap.forEach(d => {
       const u = d.data();
       const status = u.status === 'suspended' ? 'suspended' : 'active';
-      const statusText = status === 'active' ? t('statusActive') : t('statusSuspended');
-      const toggleText = status === 'active' ? t('suspendBtn') : t('enableBtn');
       const row = document.createElement('div');
       row.className = 'user-row';
       row.innerHTML = `
         <span class="user-email">${u.email || d.id}</span>
-        <span class="user-status-badge ${status}">${statusText}</span>
-        <button class="suspend-btn" onclick="toggleUserStatus('${d.id}','${status}')">${toggleText}</button>
-        <button class="delete-btn" onclick="deleteAllowedUser('${d.id}')">${t('deleteBtn')}</button>
+        <span class="user-status-badge ${status}">${status === 'active' ? 'פעיל' : 'מושהה'}</span>
+        <button class="suspend-btn" onclick="toggleUserStatus('${d.id}','${status}')">${status === 'active' ? 'השהה' : 'הפעל'}</button>
+        <button class="delete-btn" onclick="deleteAllowedUser('${d.id}')">מחק</button>
       `;
       container.appendChild(row);
     });
   } catch (e) {
-    container.innerHTML = `<div class="empty-state">${t('errLoadUsers')}${e.message}</div>`;
+    container.innerHTML = '<div class="empty-state">שגיאה בטעינת רשימת המשתמשים: ' + e.message + '</div>';
   }
 }
 
@@ -587,7 +458,7 @@ async function addAllowedUser() {
   const input = document.getElementById('new-user-email');
   const email = input.value.trim().toLowerCase();
   if (!email || !email.includes('@')) {
-    alert(t('errInvalidEmail'));
+    alert('נא להזין כתובת Gmail תקינה');
     return;
   }
   try {
@@ -599,7 +470,7 @@ async function addAllowedUser() {
     input.value = '';
     await renderAdminUsers();
   } catch (e) {
-    alert(t('errAddUser') + e.message);
+    alert('שגיאה בהוספת משתמש: ' + e.message);
   }
 }
 
@@ -609,17 +480,17 @@ async function toggleUserStatus(email, currentStatus) {
     await setDoc(doc(db, 'rems_allowed_users', email), { status: newStatus }, { merge: true });
     await renderAdminUsers();
   } catch (e) {
-    alert(t('errUpdateStatus') + e.message);
+    alert('שגיאה בעדכון סטטוס: ' + e.message);
   }
 }
 
 async function deleteAllowedUser(email) {
-  if (!confirm(t('confirmDeleteUser')(email))) return;
+  if (!confirm(`למחוק את ${email} מרשימת המשתמשים המורשים?`)) return;
   try {
     await deleteDoc(doc(db, 'rems_allowed_users', email));
     await renderAdminUsers();
   } catch (e) {
-    alert(t('errDeleteUser') + e.message);
+    alert('שגיאה במחיקת משתמש: ' + e.message);
   }
 }
 
@@ -628,7 +499,7 @@ function onOffsetChange(cb) {
   const checked = document.querySelectorAll('.offset-cb:checked');
   if (checked.length > 3) {
     cb.checked = false;
-    alert(t('maxOffsets'));
+    alert('אפשר לבחור עד 3 זמני התראה לכל תזכורת');
   }
 }
 function getSelectedOffsets() {
@@ -703,13 +574,13 @@ function renderItems() {
   archiveCountEl.textContent = archivedItems.length;
 
   if (!activeItems.length) {
-    container.innerHTML = `<div class="empty-state">${t('emptyActive')}</div>`;
+    container.innerHTML = '<div class="empty-state">אין תזכורות פעילות - הוסיפו אחת למעלה 👆</div>';
   } else {
     activeItems.forEach(item => renderRow(container, data.items.indexOf(item), item));
   }
 
   if (!archivedItems.length) {
-    archiveContainer.innerHTML = `<div class="empty-state">${t('emptyArchive')}</div>`;
+    archiveContainer.innerHTML = '<div class="empty-state">הארכיון ריק</div>';
   } else {
     archivedItems.forEach(item => renderRow(archiveContainer, data.items.indexOf(item), item));
   }
@@ -721,7 +592,7 @@ function renderItems() {
 }
 
 function renderRow(container, i, item) {
-  const dateLabel = item.date ? new Date(item.date + 'T00:00:00').toLocaleDateString(t('dateLocale'), {day:'numeric',month:'short',year:'numeric'}) : '';
+  const dateLabel = item.date ? new Date(item.date + 'T00:00:00').toLocaleDateString('he-IL', {day:'numeric',month:'short',year:'numeric'}) : '';
   const timeLabel = item.time || '';
   const offsets = (item.reminderOffsets && item.reminderOffsets.length) ? item.reminderOffsets : [24];
   const offsetsText = offsets.map(offsetLabel).join(' · ');
@@ -761,33 +632,33 @@ function deleteItem(i) {
 
 function editItem(i) {
   const item = data.items[i];
-  const text = prompt(t('promptText'), item.text);
+  const text = prompt('פרטי הפגישה:', item.text);
   if (text === null || !text.trim()) return;
-  const location = prompt(t('promptLocation'), item.location || '');
-  const date = prompt(t('promptDate'), item.date || '');
-  const time = prompt(t('promptTime'), item.time || '');
+  const location = prompt('מיקום (אופציונלי):', item.location || '');
+  const date = prompt('תאריך (YYYY-MM-DD):', item.date || '');
+  const time = prompt('שעה (HH:MM):', item.time || '');
 
-  const offsetLegend = OFFSET_HOURS.map((h, idx) => `${idx + 1}. ${offsetLabel(h)}`).join('\n');
+  const offsetLegend = OFFSET_OPTIONS.map((o, idx) => `${idx + 1}. ${o.label}`).join('\n');
   const currentOffsets = (item.reminderOffsets && item.reminderOffsets.length) ? item.reminderOffsets : [24];
   const currentNums = currentOffsets
-    .map(h => OFFSET_HOURS.findIndex(oh => Math.abs(oh - h) < 0.01) + 1)
+    .map(h => OFFSET_OPTIONS.findIndex(o => Math.abs(o.hours - h) < 0.01) + 1)
     .filter(n => n > 0).join(',');
-  const offsetsInput = prompt(`${t('promptOffsets')}\n${offsetLegend}`, currentNums || '3');
+  const offsetsInput = prompt(`מתי להתריע (עד 3, מספרים מופרדים בפסיק):\n${offsetLegend}`, currentNums || '3');
   let reminderOffsets = currentOffsets;
   if (offsetsInput !== null) {
-    const nums = offsetsInput.split(',').map(s => parseInt(s.trim(), 10)).filter(n => n >= 1 && n <= OFFSET_HOURS.length);
+    const nums = offsetsInput.split(',').map(s => parseInt(s.trim(), 10)).filter(n => n >= 1 && n <= OFFSET_OPTIONS.length);
     const uniqueNums = [...new Set(nums)].slice(0, 3);
-    if (uniqueNums.length) reminderOffsets = uniqueNums.map(n => OFFSET_HOURS[n - 1]);
+    if (uniqueNums.length) reminderOffsets = uniqueNums.map(n => OFFSET_OPTIONS[n - 1].hours);
   }
 
-  const repeatLegend = REPEAT_VALUES.map((v, idx) => `${idx + 1}. ${repeatLabel(v)}`).join('\n');
+  const repeatLegend = REPEAT_OPTIONS.map((o, idx) => `${idx + 1}. ${o.label}`).join('\n');
   const currentRepeat = item.repeat || 'none';
-  const currentRepeatNum = REPEAT_VALUES.indexOf(currentRepeat) + 1;
-  const repeatInput = prompt(`${t('promptRepeat')}\n${repeatLegend}`, String(currentRepeatNum || 1));
+  const currentRepeatNum = REPEAT_OPTIONS.findIndex(o => o.value === currentRepeat) + 1;
+  const repeatInput = prompt(`חזרתיות:\n${repeatLegend}`, String(currentRepeatNum || 1));
   let repeat = currentRepeat;
   if (repeatInput !== null) {
     const n = parseInt(repeatInput.trim(), 10);
-    if (n >= 1 && n <= REPEAT_VALUES.length) repeat = REPEAT_VALUES[n - 1];
+    if (n >= 1 && n <= REPEAT_OPTIONS.length) repeat = REPEAT_OPTIONS[n - 1].value;
   }
 
   item.text = text.trim();
@@ -825,7 +696,7 @@ function addReminder() {
 // חשיפה ל-window - חובה כי זה <script type="module">, ואירועי onclick/onchange
 // בתוך ה-HTML רצים בהיקף הגלובלי ולא יכולים לראות פונקציות ברמת המודול.
 Object.assign(window, {
-  loginWithGoogle, logout, enablePush, toggleLanguage,
+  loginWithGoogle, logout, enablePush,
   onOffsetChange, toggleItem, deleteItem, editItem, addReminder, switchTab,
   openAdminScreen, closeAdminScreen, addAllowedUser, toggleUserStatus, deleteAllowedUser,
 });
