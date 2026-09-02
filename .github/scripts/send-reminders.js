@@ -47,7 +47,19 @@ function israelToUtc(dateStr, timeStr) {
   return new Date(guess - offset);
 }
 
-function offsetLabel(hours) {
+function offsetLabel(hours, lang = 'he') {
+  if (lang === 'en') {
+    if (Math.abs(hours - 168) < 0.01) return '1 week before';
+    if (Math.abs(hours - 72)  < 0.01) return '3 days before';
+    if (Math.abs(hours - 24)  < 0.01) return '1 day before';
+    if (Math.abs(hours - 12)  < 0.01) return '12 hours before';
+    if (Math.abs(hours - 2)   < 0.01) return '2 hours before';
+    if (Math.abs(hours - 1)   < 0.01) return '1 hour before';
+    if (Math.abs(hours - 0.5) < 0.01) return '30 minutes before';
+    if (Math.abs(hours) < 0.01) return 'At the exact time';
+    if (hours < 1) return `${Math.round(hours * 60)} minutes before`;
+    return `${hours} hours before`;
+  }
   if (Math.abs(hours - 168) < 0.01) return 'שבוע לפני';
   if (Math.abs(hours - 72)  < 0.01) return '3 ימים לפני';
   if (Math.abs(hours - 24)  < 0.01) return 'יום לפני';
@@ -104,15 +116,15 @@ function buildNextOccurrence(item) {
   };
 }
 
-async function sendPush(subscription, item, offsetText) {
-  const dateLabel = new Date(item.date + 'T00:00:00').toLocaleDateString('he-IL', {
+async function sendPush(subscription, item, offsetText, lang = 'he') {
+  const dateLabel = new Date(item.date + 'T00:00:00').toLocaleDateString(lang === 'en' ? 'en-US' : 'he-IL', {
     day: 'numeric', month: 'long', year: 'numeric',
   });
   // שם התזכורת עצמו (item.text) הוא הדבר הכי חשוב שרוצים לראות - שמים אותו בכותרת
   // (מוצג גדול/מודגש) במקום קבור בתוך גוף ההודעה, כדי שיהיה ברור מיד על מה מדובר
   // בלי לפתוח את האפליקציה.
   const title = `🔔 ${item.text}`;
-  let body = `${dateLabel} בשעה ${item.time}`;
+  let body = lang === 'en' ? `${dateLabel} at ${item.time}` : `${dateLabel} בשעה ${item.time}`;
   if (item.location) body += ` · ${item.location}`;
   if (offsetText) body += ` (${offsetText})`;
 
@@ -145,6 +157,7 @@ async function main() {
     const data = userDoc.data();
     if (!Array.isArray(data.items) || !data.items.length) continue;
 
+    const lang = data.language === 'en' ? 'en' : 'he';
     const subscription = data.pushSubscription;
     let changed = false;
     let subscriptionInvalid = false;
@@ -173,7 +186,7 @@ async function main() {
         }
         try {
           console.log(`שולח תזכורת (${offsetLabel(offset)}): "${item.text}" (${item.date} ${item.time})`);
-          await sendPush(subscription, item, offsetLabel(offset));
+          await sendPush(subscription, item, offsetLabel(offset, lang), lang);
           notifiedOffsets.push(offset);
           changed = true;
           sentCount++;
