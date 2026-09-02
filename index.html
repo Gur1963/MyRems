@@ -215,6 +215,10 @@ let currentUser = null;
 let isAdmin = false;
 let DOC = null;
 let data = { items: [], pushSubscription: null };
+// פריטים פעילים (לא בוצעו) מוצגים בטאב "תזכורות". פריטים שבוצעו (done) עוברים
+// אוטומטית לטאב "ארכיון" הנפרד, ולא נמחקים ידנית יותר - הם יימחקו לצמיתות
+// אוטומטית אחרי תקופת השמירה (ר' send-reminders.js).
+let activeTab = 'active'; // 'active' | 'archive'
 
 // ── שפה (עברית/אנגלית) - נשמרת פר-משתמש ב-data.language, ברירת מחדל עברית ─────
 const I18N = {
@@ -669,11 +673,6 @@ function highlightFromUrl() {
   const newUrl = location.pathname + (params.toString() ? '?' + params.toString() : '') + location.hash;
   history.replaceState(null, '', newUrl);
 }
-
-// פריטים פעילים (לא בוצעו) מוצגים בטאב "תזכורות", ממוינים לפי התאריך/שעה הקרוב ביותר.
-// פריטים שבוצעו (done) עוברים אוטומטית לטאב "ארכיון" הנפרד, ולא נמחקים ידנית יותר -
-// הם יימחקו לצמיתות אוטומטית אחרי תקופת השמירה (ר' send-reminders.js).
-let activeTab = 'active'; // 'active' | 'archive'
 
 function switchTab(tab) {
   activeTab = tab;
