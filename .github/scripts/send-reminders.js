@@ -139,7 +139,10 @@ async function sendPush(subscription, item, offsetText, lang = 'he') {
   });
 
   try {
-    await webpush.sendNotification(subscription, payload);
+    // urgency 'high' = מסירה מיידית גם כשהטלפון במצב חיסכון/שינה (Doze). בלי זה ברירת
+    // המחדל היא 'normal', ואנדרואיד רשאי לעכב את ההתראה עד שהמכשיר מתעורר.
+    // TTL = כמה זמן שירות ה-Push ימשיך לנסות אם המכשיר לא מחובר (יממה).
+    await webpush.sendNotification(subscription, payload, { urgency: 'high', TTL: 24 * 60 * 60 });
   } catch (e) {
     // מנוי שפג תוקפו / נמחק בצד הדפדפן (410 Gone / 404) - לא נחשב שגיאה קריטית,
     // רק אומר שהמכשיר הזה כבר לא רשום. נזרוק הלאה כדי שהקורא יוכל לנקות את הרשומה.
