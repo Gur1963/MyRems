@@ -254,7 +254,16 @@ async function main() {
     }
 
     if (changed) {
-      await userDoc.ref.set(data);
+      // מעדכנים רק את השדות שהסקריפט באמת משנה (ולא את כל המסמך) - כדי לא לדרוס
+      // מנוי Push חדש שהאפליקציה שמרה בזמן שהריצה הזו הייתה באמצע.
+      const update = { items: data.items };
+      if (subscriptionInvalid) {
+        // מוחקים את המנוי רק אם בענן עדיין שמור אותו מנוי שנדחה (ולא חדש יותר)
+        const fresh = (await userDoc.ref.get()).data() || {};
+        const current = fresh.pushSubscription;
+        if (current && current.endpoint === subscription.endpoint) update.pushSubscription = null;
+      }
+      await userDoc.ref.update(update);
     }
   }
 

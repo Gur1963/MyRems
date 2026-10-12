@@ -215,6 +215,10 @@ let currentUser = null;
 let isAdmin = false;
 let DOC = null;
 let data = { items: [], pushSubscription: null };
+// כתובת (endpoint) מנוי ה-Push של המכשיר/דפדפן הנוכחי, כפי שאומתה מול הדפדפן
+// (ר' syncPushSubscription). מוצהר כאן למעלה כי refreshPushBanner קורא אותו כבר
+// בקריאה המוקדמת ל-applyI18n().
+let devicePushEndpoint = null;
 // פריטים פעילים (לא בוצעו) מוצגים בטאב "תזכורות". פריטים שבוצעו (done) עוברים
 // אוטומטית לטאב "ארכיון" הנפרד, ולא נמחקים ידנית יותר - הם יימחקו לצמיתות
 // אוטומטית אחרי תקופת השמירה (ר' send-reminders.js).
@@ -385,8 +389,25 @@ applyI18n();
 // ── שמירה/טעינה ──────────────────────────────────────────────────────────
 async function save() {
   if (!DOC) return;
-  try { await setDoc(DOC, data); }
+  // מנוי ה-Push נשמר בנפרד (savePushSubscription) ולא מכאן - כדי שעותק ישן שלו
+  // שנשאר בזיכרון לא ידרוס מנוי עדכני יותר שנשמר בינתיים בענן.
+  const { pushSubscription, ...rest } = data;
+  try { await setDoc(DOC, rest, { merge: true }); }
   catch (e) { alert(t('errSave') + e.message); }
+}
+
+// רענון הנתונים מהענן בלי לבנות מחדש את כל הממשק - נקרא כשחוזרים לאפליקציה
+// שנשארה פתוחה ברקע, כדי לא לעבוד (ולשמור) על עותק ישן.
+async function refreshFromCloud() {
+  try {
+    const snap = await getDoc(DOC);
+    if (!snap.exists()) return;
+    data = snap.data();
+    if (!Array.isArray(data.items)) data.items = [];
+    renderItems();
+  } catch (e) {
+    console.error('שגיאת רענון:', e);
+  }
 }
 
 async function loadFromCloud() {
@@ -479,15 +500,25 @@ onAuthStateChanged(auth, async (user) => {
 
     DOC = doc(db, 'rems_users', user.uid);
     document.getElementById('user-name').textContent = user.displayName || user.email;
+    devicePushEndpoint = getOwnedEndpoint();
     await loadFromCloud();
     showAppScreen();
     highlightFromUrl();
+    syncPushSubscription();
   } else {
     currentUser = null;
     isAdmin = false;
     DOC = null;
+    devicePushEndpoint = null;
     showLoginScreen();
   }
+});
+
+// חזרה לאפליקציה שנשארה פתוחה ברקע: מרעננים נתונים ומוודאים שוב שמנוי ה-Push תקף.
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !DOC) return;
+  await refreshFromCloud();
+  syncPushSubscription();
 });
 
 // ── Push: הפעלת התראות בדפדפן (Web Push) ────────────────────────────────
@@ -511,7 +542,10 @@ function refreshPushBanner() {
     btn.style.display = 'none';
     return;
   }
-  if (Notification.permission === 'granted' && data.pushSubscription) {
+  // "מופעל" רק אם המנוי השמור בענן הוא של המכשיר הזה - לא מספיק שקיים מנוי כלשהו
+  // (הוא יכול להיות של מכשיר אחר, ואז לכאן לא יגיעו התראות).
+  if (Notification.permission === 'granted' && data.pushSubscription
+      && data.pushSubscription.endpoint === devicePushEndpoint) {
     banner.style.display = 'flex';
     banner.className = 'ok';
     text.textContent = t('pushOn');
@@ -524,20 +558,89 @@ function refreshPushBanner() {
   }
 }
 
+// זיכרון מקומי (פר-משתמש, פר-מכשיר) של ה-endpoint האחרון שהמכשיר הזה רשם בענן.
+// לפיו יודעים אם המנוי השמור בענן "שייך" למכשיר הזה - ורק אז מחדשים אותו אוטומטית,
+// כדי שפתיחת האפליקציה במכשיר אחר לא תחטוף את ההתראות (יש מנוי אחד למשתמש).
+function ownedEndpointKey() { return `myrems_push_endpoint_${currentUser ? currentUser.uid : ''}`; }
+function getOwnedEndpoint() {
+  try { return localStorage.getItem(ownedEndpointKey()); } catch (e) { return null; }
+}
+function setOwnedEndpoint(endpoint) {
+  try {
+    if (endpoint) localStorage.setItem(ownedEndpointKey(), endpoint);
+    else localStorage.removeItem(ownedEndpointKey());
+  } catch (e) { /* לא קריטי */ }
+}
+
+async function savePushSubscription(subscriptionJson) {
+  data.pushSubscription = subscriptionJson;
+  await setDoc(DOC, { pushSubscription: subscriptionJson }, { mergeFields: ['pushSubscription'] });
+}
+
+function subscribeToPush(reg) {
+  return reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+  });
+}
+
+// מוודא שהמכשיר באמת ערוך לקבל התראות, ומתקן בשקט אם לא: נקרא בכל כניסה ובכל
+// חזרה לאפליקציה. הדפדפן מחליף/מבטל מנויי Push מדי פעם, והשרת מוחק מנוי שנדחה
+// (410) - בלי הבדיקה הזו ההתראות היו נעצרות עד ללחיצה ידנית על "הפעל התראות".
+let _pushSyncInProgress = false;
+async function syncPushSubscription() {
+  if (!DOC || _pushSyncInProgress) return;
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  _pushSyncInProgress = true;
+  try {
+    await navigator.serviceWorker.register('sw.js');
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    const cloudEndpoint = data.pushSubscription ? data.pushSubscription.endpoint : null;
+
+    if (!sub || sub.endpoint !== cloudEndpoint) {
+      // המנוי בענן שייך למכשיר אחר - לא נוגעים (הבאנר יציע להפעיל כאן ידנית)
+      if (cloudEndpoint && cloudEndpoint !== getOwnedEndpoint()) {
+        setOwnedEndpoint(null);
+        devicePushEndpoint = sub ? sub.endpoint : null;
+        return;
+      }
+      // אין מנוי בענן (השרת מחק אותו כי נדחה) - המנוי שנשאר בדפדפן חשוד כמת,
+      // אז יוצרים חדש לגמרי במקום לשמור אותו שוב.
+      if (sub && !cloudEndpoint) {
+        await sub.unsubscribe();
+        sub = null;
+      }
+      if (!sub) sub = await subscribeToPush(reg);
+      await savePushSubscription(sub.toJSON());
+    }
+    devicePushEndpoint = sub.endpoint;
+    setOwnedEndpoint(sub.endpoint);
+  } catch (e) {
+    console.error('שגיאה בסנכרון מנוי Push:', e);
+  } finally {
+    _pushSyncInProgress = false;
+    refreshPushBanner();
+  }
+}
+
 async function enablePush() {
   try {
-    const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.register('sw.js');
+    const reg = await navigator.serviceWorker.ready;
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       alert(t('errPushDenied'));
       return;
     }
-    const subscription = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-    });
-    data.pushSubscription = subscription.toJSON();
-    await save();
+    // לחיצה מפורשת = תמיד מנוי טרי, כדי לא לשמור שוב מנוי ישן שכבר לא תקף
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) await existing.unsubscribe();
+    const subscription = await subscribeToPush(reg);
+    await savePushSubscription(subscription.toJSON());
+    devicePushEndpoint = subscription.endpoint;
+    setOwnedEndpoint(subscription.endpoint);
     refreshPushBanner();
   } catch (e) {
     alert(t('errPushEnable') + e.message);
