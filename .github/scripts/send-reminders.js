@@ -116,7 +116,7 @@ function buildNextOccurrence(item) {
   };
 }
 
-async function sendPush(subscription, item, offsetText, lang = 'he') {
+async function sendPush(subscription, item, offset, offsetText, lang = 'he') {
   const dateLabel = new Date(item.date + 'T00:00:00').toLocaleDateString(lang === 'en' ? 'en-US' : 'he-IL', {
     day: 'numeric', month: 'long', year: 'numeric',
   });
@@ -135,7 +135,9 @@ async function sendPush(subscription, item, offsetText, lang = 'he') {
     title,
     body,
     url: `./index.html?highlight=${encodeURIComponent(highlightKey)}`,
-    tag: `myrems-${item.date}-${item.time}`,
+    // tag ייחודי לכל זמן התראה (ולא רק לפריט) - אחרת התראה מאוחרת יותר של אותו פריט
+    // (למשל "בדיוק בזמן") מחליפה בשקט התראה קודמת ("חצי שעה לפני") שעוד לא נראתה.
+    tag: `myrems-${item.date}-${item.time}-${offset}`,
   });
 
   try {
@@ -189,7 +191,7 @@ async function main() {
         }
         try {
           console.log(`שולח תזכורת (${offsetLabel(offset)}): "${item.text}" (${item.date} ${item.time})`);
-          await sendPush(subscription, item, offsetLabel(offset, lang), lang);
+          await sendPush(subscription, item, offset, offsetLabel(offset, lang), lang);
           notifiedOffsets.push(offset);
           changed = true;
           sentCount++;
