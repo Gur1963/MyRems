@@ -34,14 +34,14 @@ jobs:
       run:
         working-directory: android-app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -101,13 +101,20 @@ jobs:
         run: |
           set -e
           echo "$KS" | base64 -d > "$RUNNER_TEMP/myrems.keystore"
-          npx cap build android \
+          if ! npx cap build android \
             --keystorepath "$RUNNER_TEMP/myrems.keystore" \
             --keystorepass "$KS_PW" \
             --keystorealias myrems \
             --keystorealiaspass "$KS_PW" \
             --androidreleasetype APK \
-            --signing-type apksigner
+            --signing-type apksigner > "$RUNNER_TEMP/build.log" 2>&1; then
+            cat "$RUNNER_TEMP/build.log"
+            # מציג את סוף הלוג גם כ-annotation (נראה בלי התחברות, לאבחון)
+            msg=$( (grep -E -A12 "What went wrong|error:|ERROR|\[error\]" "$RUNNER_TEMP/build.log" || tail -40 "$RUNNER_TEMP/build.log") | head -60 | sed "s/$KS_PW/***/g" | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=Build failed::$msg"
+            exit 1
+          fi
+          tail -20 "$RUNNER_TEMP/build.log"
           APK=$(find android/app/build/outputs/apk -name '*.apk' ! -name '*unsigned*' | head -1)
           [ -n "$APK" ] || { echo "::error::לא נמצא APK חתום"; find android/app/build/outputs; exit 1; }
           cp "$APK" "$RUNNER_TEMP/MyRems.apk"
