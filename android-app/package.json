@@ -1,0 +1,14 @@
+{
+  "name": "myrems-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "MyRems wrapped as a native Android app (Capacitor). Loads the live site and adds local scheduled notifications.",
+  "dependencies": {
+    "@capacitor-firebase/authentication": "^8.6.0",
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/local-notifications": "^8.0.0",
+    "firebase": "^12.6.0"
+  }
+}

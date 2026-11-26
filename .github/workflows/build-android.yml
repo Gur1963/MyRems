@@ -1,0 +1,124 @@
+# בונה את אפליקציית האנדרואיד של MyRems (Capacitor) ומפרסם אותה כקובץ APK
+# בכתובת קבועה:
+#   https://github.com/Gur1963/MyRems/releases/download/android-latest/MyRems.apk
+#
+# האפליקציה טוענת את האתר החי (gur1963.github.io/MyRems), כך ששינויים ב-index.html
+# מגיעים אליה בלי לבנות מחדש. צריך לבנות מחדש רק כשמשנים משהו בתיקייה android-app/.
+#
+# סודות נדרשים (GitHub → Settings → Secrets and variables → Actions):
+#   ANDROID_KEYSTORE_BASE64   - קובץ מפתח החתימה, מקודד base64
+#   ANDROID_KEYSTORE_PASSWORD - הסיסמה שלו
+# וגם הקובץ android-app/google-services.json (מ-Firebase Console, לא סודי).
+
+name: Build Android app
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/build-android.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-android
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: android-app/package-lock.json
+
+      - name: Check required files and secrets
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          ok=1
+          [ -f google-services.json ] || { echo "::error::חסר android-app/google-services.json (מ-Firebase Console)"; ok=0; }
+          [ -n "$KS" ] || { echo "::error::חסר הסוד ANDROID_KEYSTORE_BASE64"; ok=0; }
+          [ -n "$KS_PW" ] || { echo "::error::חסר הסוד ANDROID_KEYSTORE_PASSWORD"; ok=0; }
+          [ $ok = 1 ]
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Android project
+        run: npx cap add android
+
+      - name: Customize Android project
+        run: |
+          set -e
+          # Google sign-in (native) - firebase auth plugin + google-services
+          cp google-services.json android/app/google-services.json
+          printf '\next {\n    rgcfaIncludeGoogle = true\n}\n' >> android/variables.gradle
+
+          # התראות בזמן מדויק: USE_EXACT_ALARM ניתן אוטומטית לאפליקציות תזכורות
+          # (בלי לשלוח את המשתמש להגדרות). SCHEDULE_EXACT_ALARM כבר מגיע מהתוסף.
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
+
+          # אייקון קטן לשורת המצב (פעמון לבן)
+          mkdir -p android/app/src/main/res/drawable
+          cp res/drawable/ic_stat_myrems.xml android/app/src/main/res/drawable/
+
+          # אייקון האפליקציה = אותו אייקון של האתר
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+          for d in android/app/src/main/res/mipmap-*; do
+            cp ../icon-512.png "$d/ic_launcher.png"
+            cp ../icon-512.png "$d/ic_launcher_round.png"
+            cp ../icon-512.png "$d/ic_launcher_foreground.png"
+          done
+
+          # מספר גרסה עולה בכל בנייה (כדי שהתקנה חדשה תעדכן את הקיימת)
+          sed -i -E "s/versionCode [0-9]+/versionCode ${GITHUB_RUN_NUMBER}/; s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" android/app/build.gradle
+          grep -E "versionCode|versionName" android/app/build.gradle
+
+      - name: Sync
+        run: npx cap sync android
+
+      - name: Build signed APK
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -e
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/myrems.keystore"
+          npx cap build android \
+            --keystorepath "$RUNNER_TEMP/myrems.keystore" \
+            --keystorepass "$KS_PW" \
+            --keystorealias myrems \
+            --keystorealiaspass "$KS_PW" \
+            --androidreleasetype APK \
+            --signing-type apksigner
+          APK=$(find android/app/build/outputs/apk -name '*.apk' ! -name '*unsigned*' | head -1)
+          [ -n "$APK" ] || { echo "::error::לא נמצא APK חתום"; find android/app/build/outputs; exit 1; }
+          cp "$APK" "$RUNNER_TEMP/MyRems.apk"
+          rm -f "$RUNNER_TEMP/myrems.keystore"
+
+      - name: Publish to release "android-latest"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest "$RUNNER_TEMP/MyRems.apk" \
+            --target "$GITHUB_SHA" \
+            --title "MyRems Android (build ${GITHUB_RUN_NUMBER})" \
+            --notes "אפליקציית אנדרואיד של MyRems. להורדה בטלפון: לחצו על MyRems.apk למטה."

@@ -1,0 +1,19 @@
+{
+  "appId": "com.gur1963.myrems",
+  "appName": "MyRems",
+  "webDir": "www",
+  "server": {
+    "url": "https://gur1963.github.io/MyRems/",
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": ["google.com"]
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_myrems",
+      "iconColor": "#c0392b"
+    }
+  }
+}

@@ -14,6 +14,9 @@ const webpush = require('web-push');
 const ARCHIVE_RETENTION_DAYS = 14;
 const ARCHIVE_RETENTION_MS = ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
+// כמה זמן סומכים על רשימת ההתראות שהטלפון דיווח שתזמן (nativeScheduled) בלי שרוענה.
+const NATIVE_SCHEDULED_TRUST_MS = 7 * 24 * 60 * 60 * 1000;
+
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
@@ -164,6 +167,14 @@ async function main() {
 
     const lang = data.language === 'en' ? 'en' : 'he';
     const subscription = data.pushSubscription;
+    // התראות שאפליקציית האנדרואיד כבר תזמנה מקומית בטלפון (ר' syncNativeNotifications
+    // ב-index.html) - עליהן לא שולחים Web Push, כדי שלא יגיעו כפולות. סומכים על
+    // הרשימה רק אם היא עדכנית (הטלפון מרענן אותה בכל פתיחה, ולפחות כל 12 שעות כשפתוח),
+    // כדי שאפליקציה שהוסרה לא "תבלע" תזכורות לנצח.
+    const native = data.nativeScheduled;
+    const nativeFresh = native && Array.isArray(native.keys) && native.updatedAt
+      && (now - new Date(native.updatedAt)) < NATIVE_SCHEDULED_TRUST_MS;
+    const nativeKeys = new Set(nativeFresh ? native.keys : []);
     let changed = false;
     let subscriptionInvalid = false;
     const newOccurrences = [];
@@ -184,6 +195,13 @@ async function main() {
         // בלי לדרוש שנשאר זמן חיובי (אחרת זה לעולם לא יתקיים).
         const shouldSend = offset > 0 ? (diffHours <= offset && diffHours > 0) : (diffHours <= 0);
         if (!shouldSend) continue;
+
+        if (nativeKeys.has(`${item.date}|${item.time}|${offset}`)) {
+          console.log(`מתוזמן בטלפון (אפליקציה) - בלי Web Push (${offsetLabel(offset)}): "${item.text}" (${item.date} ${item.time})`);
+          notifiedOffsets.push(offset);
+          changed = true;
+          continue;
+        }
 
         if (!subscription) {
           skippedNoSub++;

@@ -106,7 +106,7 @@
 <div id="app-screen" style="display:none">
   <header>
     <div>
-      <div class="title">🔔 MyRems <span style="font-size:11px; color:#999; font-weight:normal">v2026-11-03</span></div>
+      <div class="title">🔔 MyRems <span style="font-size:11px; color:#999; font-weight:normal">v2026-11-26</span></div>
       <div class="user" id="user-name"></div>
     </div>
     <div style="display:flex; gap:6px">
@@ -186,7 +186,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithCredential, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 // אותו פרויקט Firebase שכבר קיים ל-MyLists - רק collection נפרד ('rems_users'),
 // כדי לא לגעת בנתונים הקיימים של MyLists.
@@ -224,6 +224,21 @@ let devicePushEndpoint = null;
 // אוטומטית אחרי תקופת השמירה (ר' send-reminders.js).
 let activeTab = 'active'; // 'active' | 'archive'
 
+// ── אפליקציית אנדרואיד (Capacitor, ר' android-app/) ─────────────────────────
+// האפליקציה טוענת את אותו האתר הזה בדיוק, ו-Capacitor מזריק לדף את window.Capacitor
+// שדרכו מדברים עם חלקי הטלפון: התראות מקומיות מתוזמנות (LocalNotifications) וכניסה
+// עם Google (FirebaseAuthentication). בדפדפן רגיל IS_NATIVE=false ושום דבר לא משתנה.
+const CAP = window.Capacitor;
+const IS_NATIVE = !!(CAP && typeof CAP.isNativePlatform === 'function' && CAP.isNativePlatform());
+function nativeCall(plugin, method, options = {}) { return CAP.nativePromise(plugin, method, options); }
+function nativeListen(plugin, eventName, fn) {
+  CAP.nativeCallback(plugin, 'addListener', { eventName }, (result) => { if (result) fn(result); });
+}
+// מצב ההתראות המקומיות בטלפון (מתעדכן ב-syncNativeNotifications), להצגה בבאנר
+let nativeNotifState = { permission: null, exact: null };
+// מפתח פריט להדגשה אחרי לחיצה על התראה מקומית, אם הגיעה לפני שהנתונים נטענו
+let pendingHighlightKey = null;
+
 // ── שפה (עברית/אנגלית) - נשמרת פר-משתמש ב-data.language, ברירת מחדל עברית ─────
 const I18N = {
   he: {
@@ -254,6 +269,10 @@ const I18N = {
     errUpdateStatus: 'שגיאה בעדכון סטטוס: ',
     errDeleteUser: 'שגיאה במחיקת משתמש: ',
     errLoadUsers: 'שגיאה בטעינת רשימת המשתמשים: ',
+    nativeOn: '✓ התראות מתוזמנות בטלפון הזה',
+    nativeExactOff: 'כדי שההתראות יגיעו בזמן המדויק צריך לאשר "שעונים מעוררים ותזכורות".',
+    nativeExactBtn: 'לאישור',
+    notifAt: 'בשעה',
     confirmDeleteUser: email => `למחוק את ${email} מרשימת המשתמשים המורשים?`,
     maxOffsets: 'אפשר לבחור עד 3 זמני התראה לכל תזכורת',
     promptText: 'פרטי הפגישה:', promptLocation: 'מיקום (אופציונלי):',
@@ -291,6 +310,10 @@ const I18N = {
     errUpdateStatus: 'Error updating status: ',
     errDeleteUser: 'Error deleting user: ',
     errLoadUsers: 'Error loading user list: ',
+    nativeOn: '✓ Reminders are scheduled on this phone',
+    nativeExactOff: 'To get reminders exactly on time, allow "Alarms & reminders".',
+    nativeExactBtn: 'Allow',
+    notifAt: 'at',
     confirmDeleteUser: email => `Remove ${email} from the approved users list?`,
     maxOffsets: 'You can pick up to 3 reminder times per item',
     promptText: 'Event details:', promptLocation: 'Location (optional):',
@@ -391,9 +414,12 @@ async function save() {
   if (!DOC) return;
   // מנוי ה-Push נשמר בנפרד (savePushSubscription) ולא מכאן - כדי שעותק ישן שלו
   // שנשאר בזיכרון לא ידרוס מנוי עדכני יותר שנשמר בינתיים בענן.
-  const { pushSubscription, ...rest } = data;
+  // אותו דבר לגבי nativeScheduled - רק הטלפון עם האפליקציה כותב אותו (saveNativeScheduled).
+  const { pushSubscription, nativeScheduled, ...rest } = data;
   try { await setDoc(DOC, rest, { merge: true }); }
   catch (e) { alert(t('errSave') + e.message); }
+  // כל שינוי בפריטים (או בשפה) = לתזמן מחדש את ההתראות המקומיות בטלפון
+  syncNativeNotifications();
 }
 
 // רענון הנתונים מהענן בלי לבנות מחדש את כל הממשק - נקרא כשחוזרים לאפליקציה
@@ -472,17 +498,36 @@ async function loginWithGoogle() {
   if (_loginInProgress) return;
   _loginInProgress = true;
   try {
-    await signInWithPopup(auth, provider);
-  } catch (e) {
-    if (e.code !== 'auth/cancelled-popup-request' && e.code !== 'auth/popup-closed-by-user') {
-      alert(t('errLogin') + e.message);
+    if (IS_NATIVE) {
+      // בתוך אפליקציה Google חוסמת את חלון ההתחברות הרגיל (popup), אז מתחברים
+      // דרך מסך הבחירת-חשבון של הטלפון, ומעבירים את הטוקן ל-Firebase של הדף.
+      const res = await nativeCall('FirebaseAuthentication', 'signInWithGoogle', { skipNativeAuth: true });
+      const idToken = res && res.credential && res.credential.idToken;
+      if (!idToken) throw new Error('Google sign-in returned no token');
+      await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+    } else {
+      await signInWithPopup(auth, provider);
     }
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    const cancelled = e.code === 'auth/cancelled-popup-request' || e.code === 'auth/popup-closed-by-user'
+      || /cancel/i.test(msg);
+    if (!cancelled) alert(t('errLogin') + msg);
   } finally {
     _loginInProgress = false;
   }
 }
 
-async function logout() { await signOut(auth); }
+async function logout() {
+  if (IS_NATIVE) {
+    // יציאה מהאפליקציה = לבטל את ההתראות שתוזמנו בטלפון, ולהודיע לשרת שמעכשיו
+    // הוא אחראי לשלוח שוב בעצמו (Web Push) גם את מה שהטלפון היה אמור להציג.
+    try { await cancelAllNativeNotifications(); } catch (e) { console.error(e); }
+    try { if (DOC) await saveNativeScheduled([], true); } catch (e) { console.error(e); }
+    try { await nativeCall('FirebaseAuthentication', 'signOut'); } catch (e) { console.error(e); }
+  }
+  await signOut(auth);
+}
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
@@ -505,6 +550,7 @@ onAuthStateChanged(auth, async (user) => {
     showAppScreen();
     highlightFromUrl();
     syncPushSubscription();
+    syncNativeNotifications();
   } else {
     currentUser = null;
     isAdmin = false;
@@ -519,6 +565,7 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible' || !DOC) return;
   await refreshFromCloud();
   syncPushSubscription();
+  syncNativeNotifications();
 });
 
 // ── Push: הפעלת התראות בדפדפן (Web Push) ────────────────────────────────
@@ -535,6 +582,28 @@ function refreshPushBanner() {
   const banner = document.getElementById('push-banner');
   const text = document.getElementById('push-banner-text');
   const btn = document.getElementById('push-banner-btn');
+  if (IS_NATIVE) {
+    // באפליקציה: ההתראות מתוזמנות בטלפון עצמו (ולא Web Push)
+    banner.style.display = 'flex';
+    btn.textContent = t('pushEnableBtn');
+    if (nativeNotifState.permission === null) {
+      banner.style.display = 'none'; // עוד לא נבדק
+    } else if (nativeNotifState.permission !== 'granted') {
+      banner.className = '';
+      text.textContent = t('pushOff');
+      btn.style.display = '';
+    } else if (nativeNotifState.exact && nativeNotifState.exact !== 'granted') {
+      banner.className = '';
+      text.textContent = t('nativeExactOff');
+      btn.textContent = t('nativeExactBtn');
+      btn.style.display = '';
+    } else {
+      banner.className = 'ok';
+      text.textContent = t('nativeOn');
+      btn.style.display = 'none';
+    }
+    return;
+  }
   if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
     banner.style.display = 'flex';
     banner.className = '';
@@ -589,7 +658,7 @@ function subscribeToPush(reg) {
 // (410) - בלי הבדיקה הזו ההתראות היו נעצרות עד ללחיצה ידנית על "הפעל התראות".
 let _pushSyncInProgress = false;
 async function syncPushSubscription() {
-  if (!DOC || _pushSyncInProgress) return;
+  if (!DOC || _pushSyncInProgress || IS_NATIVE) return;
   if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
   if (Notification.permission !== 'granted') return;
   _pushSyncInProgress = true;
@@ -626,6 +695,7 @@ async function syncPushSubscription() {
 }
 
 async function enablePush() {
+  if (IS_NATIVE) return enableNativeNotifications();
   try {
     await navigator.serviceWorker.register('sw.js');
     const reg = await navigator.serviceWorker.ready;
@@ -645,6 +715,188 @@ async function enablePush() {
   } catch (e) {
     alert(t('errPushEnable') + e.message);
   }
+}
+
+// ── התראות מקומיות בטלפון (רק באפליקציית אנדרואיד) ─────────────────────────
+// במקום לחכות שהשרת ישלח Web Push בזמן (מה שסמסונג/Chrome לפעמים מעכבים בשעות),
+// האפליקציה מבקשת מאנדרואיד עצמו "תציג את ההתראה הזו בשעה X" - כמו שעון מעורר.
+// בכל פתיחה/חזרה לאפליקציה ובכל שינוי בפריטים: מבטלים הכול ומתזמנים מחדש לפי הנתונים.
+// רשימת מה שתוזמן נשמרת בענן (nativeScheduled) כדי שהשרת ידלג על Web Push לאותן
+// התראות בדיוק ולא יגיעו כפולות. פריט שנוסף במחשב ועוד לא נקלט בטלפון - לא ברשימה,
+// אז השרת עדיין שולח עליו Web Push כרגיל (גיבוי).
+const NATIVE_CHANNEL_ID = 'myrems-reminders';
+const NATIVE_MAX_SCHEDULED = 60;             // לא צריך יותר מזה, ומשאיר מרווח מתחת למגבלות מערכת
+const NATIVE_REPEAT_HORIZON_DAYS = 45;       // פריטים חוזרים: מתזמנים מראש מופעים עד 45 יום קדימה
+const NATIVE_SCHEDULED_REFRESH_MS = 12 * 3600 * 1000;
+
+// זהה ל-israelToUtc ב-send-reminders.js: תאריך+שעה בשעון ישראל -> רגע אמיתי
+function israelToUtc(dateStr, timeStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [hh, mm] = timeStr.split(':').map(Number);
+  const guess = Date.UTC(y, m - 1, d, hh, mm);
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jerusalem', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const p = {};
+  dtf.formatToParts(new Date(guess)).forEach(x => { p[x.type] = x.value; });
+  const asUtcOfLocal = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+  return new Date(guess - (asUtcOfLocal - guess));
+}
+
+// זהה ל-advanceDate ב-send-reminders.js: התאריך הבא של פריט חוזר
+function nextRepeatDate(dateStr, repeat) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const fmt = (Y, M, D) => `${Y}-${String(M).padStart(2, '0')}-${String(D).padStart(2, '0')}`;
+  if (repeat === 'daily' || repeat === 'weekly') {
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + (repeat === 'daily' ? 1 : 7));
+    return fmt(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+  }
+  if (repeat === 'monthly' || repeat === 'yearly') {
+    const total = (y * 12 + (m - 1)) + (repeat === 'monthly' ? 1 : 12);
+    const ty = Math.floor(total / 12), tm = (total % 12) + 1;
+    const last = new Date(Date.UTC(ty, tm, 0)).getUTCDate();
+    return fmt(ty, tm, Math.min(d, last));
+  }
+  return null;
+}
+
+// מספר זיהוי קבוע (32 ביט חיובי) לכל התראה, נגזר מהמפתח שלה
+function nativeNotifId(key) {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (Math.imul(31, h) + key.charCodeAt(i)) | 0;
+  return (h & 0x7fffffff) || 1;
+}
+
+// כל ההתראות העתידיות שצריכות להיות מתוזמנות בטלפון, לפי הזמן, עד NATIVE_MAX_SCHEDULED.
+// המפתח `${date}|${time}|${offset}` זהה למה שהשרת בודק (send-reminders.js).
+function computeNativeNotifications() {
+  const now = Date.now();
+  const horizon = now + NATIVE_REPEAT_HORIZON_DAYS * 24 * 3600 * 1000;
+  const byKey = new Map();
+  for (const item of data.items) {
+    if (item.done || !item.date || !item.time) continue;
+    const offsets = (item.reminderOffsets && item.reminderOffsets.length) ? item.reminderOffsets : [24];
+    const maxOffsetMs = Math.max(...offsets) * 3600 * 1000;
+    let date = item.date;
+    for (let n = 0; n < 400 && date; n++) {
+      const when = israelToUtc(date, item.time).getTime();
+      if (n > 0 && when - maxOffsetMs > horizon) break;
+      // רק במופע הנוכחי ייתכן שחלק מההתראות כבר נשלחו (notifiedOffsets)
+      const sent = (n === 0 && Array.isArray(item.notifiedOffsets)) ? item.notifiedOffsets : [];
+      for (const offset of offsets) {
+        if (sent.some(o => Math.abs(o - offset) < 0.01)) continue;
+        const at = when - offset * 3600 * 1000;
+        if (at <= now) continue;
+        const key = `${date}|${item.time}|${offset}`;
+        if (!byKey.has(key)) byKey.set(key, { key, at, item, date, offset });
+      }
+      if (!item.repeat || item.repeat === 'none') break;
+      date = nextRepeatDate(date, item.repeat);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.at - b.at).slice(0, NATIVE_MAX_SCHEDULED);
+}
+
+// אותו נוסח כמו ב-Web Push (sendPush ב-send-reminders.js)
+function nativeNotifContent(n) {
+  const dateLabel = new Date(n.date + 'T00:00:00').toLocaleDateString(t('dateLocale'), { day: 'numeric', month: 'long', year: 'numeric' });
+  let body = `${dateLabel} ${t('notifAt')} ${n.item.time}`;
+  if (n.item.location) body += ` · ${n.item.location}`;
+  body += ` (${offsetLabel(n.offset)})`;
+  return { title: `🔔 ${n.item.text}`, body };
+}
+
+async function cancelAllNativeNotifications() {
+  const pending = await nativeCall('LocalNotifications', 'getPending');
+  const list = (pending && pending.notifications) || [];
+  if (list.length) await nativeCall('LocalNotifications', 'cancel', { notifications: list.map(n => ({ id: n.id })) });
+}
+
+let _lastNativeScheduledSig = null;
+let _lastNativeScheduledAt = 0;
+async function saveNativeScheduled(keys, force = false) {
+  const sig = keys.join(',');
+  const fresh = (Date.now() - _lastNativeScheduledAt) < NATIVE_SCHEDULED_REFRESH_MS;
+  if (!force && sig === _lastNativeScheduledSig && fresh) return; // אין שינוי - חוסכים כתיבה
+  const value = { keys, updatedAt: new Date().toISOString() };
+  await setDoc(DOC, { nativeScheduled: value }, { mergeFields: ['nativeScheduled'] });
+  data.nativeScheduled = value;
+  _lastNativeScheduledSig = sig;
+  _lastNativeScheduledAt = Date.now();
+}
+
+async function doSyncNativeNotifications() {
+  if (!IS_NATIVE || !DOC) return;
+  let perm = await nativeCall('LocalNotifications', 'checkPermissions');
+  // פעם ראשונה: אנדרואיד שואל "לאפשר התראות?" מיד, בלי שהמשתמש יחפש כפתור
+  if (perm.display === 'prompt' || perm.display === 'prompt-with-rationale') {
+    perm = await nativeCall('LocalNotifications', 'requestPermissions');
+  }
+  let exact = 'granted';
+  try { exact = (await nativeCall('LocalNotifications', 'checkExactNotificationSetting')).exact_alarm || 'granted'; }
+  catch (e) { /* גרסת אנדרואיד ישנה - אין צורך באישור נפרד */ }
+  nativeNotifState = { permission: perm.display, exact };
+  refreshPushBanner();
+
+  await cancelAllNativeNotifications();
+  let keys = [];
+  if (perm.display === 'granted') {
+    await nativeCall('LocalNotifications', 'createChannel', {
+      id: NATIVE_CHANNEL_ID, name: data.language === 'en' ? 'Reminders' : 'תזכורות',
+      importance: 5, visibility: 1, vibration: true, lights: true, lightColor: '#c0392b',
+    });
+    const list = computeNativeNotifications();
+    if (list.length) {
+      await nativeCall('LocalNotifications', 'schedule', {
+        notifications: list.map(n => ({
+          id: nativeNotifId(n.key),
+          ...nativeNotifContent(n),
+          channelId: NATIVE_CHANNEL_ID,
+          smallIcon: 'ic_stat_myrems',
+          iconColor: '#c0392b',
+          schedule: { at: new Date(n.at).toISOString(), allowWhileIdle: true },
+          extra: { highlight: `${n.date}|${n.item.time}` },
+        })),
+      });
+    }
+    keys = list.map(n => n.key);
+  }
+  await saveNativeScheduled(keys);
+}
+
+// קריאות חופפות (שמירה + חזרה לאפליקציה וכו') רצות אחת אחרי השנייה, לא במקביל
+let _nativeSyncChain = Promise.resolve();
+function syncNativeNotifications() {
+  if (!IS_NATIVE) return Promise.resolve();
+  _nativeSyncChain = _nativeSyncChain
+    .then(doSyncNativeNotifications)
+    .catch(e => console.error('שגיאה בתזמון התראות מקומיות:', e));
+  return _nativeSyncChain;
+}
+
+async function enableNativeNotifications() {
+  try {
+    if (nativeNotifState.permission !== 'granted') {
+      const perm = await nativeCall('LocalNotifications', 'requestPermissions');
+      if (perm.display !== 'granted') { alert(t('errPushDenied')); return; }
+    } else if (nativeNotifState.exact && nativeNotifState.exact !== 'granted') {
+      await nativeCall('LocalNotifications', 'changeExactNotificationSetting');
+    }
+  } catch (e) {
+    alert(t('errPushEnable') + ((e && e.message) || e));
+  }
+  syncNativeNotifications();
+}
+
+// לחיצה על התראה מקומית -> פותח את האפליקציה ומדגיש את הפריט (כמו ?highlight= ב-Web Push)
+if (IS_NATIVE) {
+  nativeListen('LocalNotifications', 'localNotificationActionPerformed', (ev) => {
+    const key = ev && ev.notification && ev.notification.extra && ev.notification.extra.highlight;
+    if (!key) return;
+    if (DOC) highlightItem(key); else pendingHighlightKey = key;
+  });
 }
 
 // ── ניהול משתמשים (רק למנהל - ADMIN_EMAIL) ──────────────────────────────
@@ -754,8 +1006,21 @@ function resetOffsetCheckboxes(selected) {
 function highlightFromUrl() {
   const params = new URLSearchParams(location.search);
   const key = params.get('highlight');
-  if (!key) return;
+  if (key) {
+    highlightItem(key);
+    params.delete('highlight');
+    const newUrl = location.pathname + (params.toString() ? '?' + params.toString() : '') + location.hash;
+    history.replaceState(null, '', newUrl);
+  }
+  // לחיצה על התראה מקומית (אפליקציה) שהגיעה לפני שהנתונים נטענו
+  if (pendingHighlightKey) {
+    highlightItem(pendingHighlightKey);
+    pendingHighlightKey = null;
+  }
+}
 
+function highlightItem(key) {
+  if (activeTab !== 'active') switchTab('active');
   let row = document.querySelector(`#items-list .item-row[data-key="${CSS.escape(key)}"]`);
   if (!row) {
     // querySelector מוצא אלמנטים גם כשההורה שלהם display:none, אז אפשר לבדוק
@@ -771,10 +1036,6 @@ function highlightFromUrl() {
     row.classList.add('highlight-flash');
     setTimeout(() => row.classList.remove('highlight-flash'), 3000);
   }
-
-  params.delete('highlight');
-  const newUrl = location.pathname + (params.toString() ? '?' + params.toString() : '') + location.hash;
-  history.replaceState(null, '', newUrl);
 }
 
 function switchTab(tab) {
