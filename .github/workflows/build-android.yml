@@ -101,6 +101,10 @@ jobs:
         run: |
           set -e
           echo "$KS" | base64 -d > "$RUNNER_TEMP/myrems.keystore"
+          # apksigner/zipalign נמצאים ב-build-tools של ה-SDK, שלא נמצא ב-PATH כברירת מחדל
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
+          export PATH="$PATH:$BT"
           if ! npx cap build android \
             --keystorepath "$RUNNER_TEMP/myrems.keystore" \
             --keystorepass "$KS_PW" \
